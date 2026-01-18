@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send, User as UserIcon } from 'lucide-react';
-import { User, Message } from '../types';
+import ReactMarkdown from 'react-markdown';
+import type { User, Message } from '../types';
 
 interface DashboardProps {
     user: User;
@@ -22,7 +23,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         setLoading(true);
 
         try {
-            const res = await fetch('http://localhost:5000/api/query', {
+            const res = await fetch('http://localhost:8000/api/query', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -104,10 +105,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                     {messages.map(msg => (
                         <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-xl rounded-2xl px-6 py-4 ${msg.role === 'user'
-                                    ? 'bg-orange-600 text-white rounded-br-none'
-                                    : 'bg-white border text-gray-800 rounded-bl-none shadow-sm'
+                                ? 'bg-orange-600 text-white rounded-br-none'
+                                : 'bg-white border text-gray-800 rounded-bl-none shadow-sm'
                                 }`}>
-                                <div className="whitespace-pre-wrap">{msg.content}</div>
+                                {msg.role === 'user' ? (
+                                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                                ) : (
+                                    <div className="prose prose-sm max-w-none">
+                                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}

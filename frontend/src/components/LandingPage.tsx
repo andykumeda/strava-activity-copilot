@@ -8,7 +8,7 @@ const LandingPage: React.FC = () => {
         // We can fetch the URL or just redirect if we know the endpoint works as a GET/POST that returns JSON
         // The backend `start` endpoint returns {url: "..."}
         try {
-            const response = await fetch('http://localhost:5000/api/auth/strava/start', { method: 'POST' });
+            const response = await fetch('http://localhost:8000/api/auth/strava/start', { method: 'POST' });
             const data = await response.json();
             if (data.url) {
                 window.location.href = data.url;

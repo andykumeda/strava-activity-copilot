@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
-import { User } from './types';
+import type { User } from './types';
 import { Activity } from 'lucide-react';
 
 function App() {
@@ -9,14 +9,15 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log("App mounted");
     checkAuth();
   }, []);
 
   const checkAuth = async () => {
     try {
-      // In dev, backend is on port 5000. 
+      // In dev, backend is on port 8000. 
       // Ensure backend CORS allows origin and credentials.
-      const response = await fetch('http://localhost:5000/api/auth/me', {
+      const response = await fetch('http://localhost:8000/api/auth/me', {
         credentials: 'include' // Send cookies
       });
 
