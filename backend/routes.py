@@ -1,26 +1,33 @@
 import os
 import re
+import asyncio
 import httpx
-from google import genai
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from .database import get_db
 from .models import User, Token
 from .deps import get_current_user
+from .context_optimizer import ContextOptimizer
+from .llm_provider import get_llm_provider
 
 router = APIRouter()
 
-# Configure Gemini
-GENAI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GENAI_API_KEY:
-    print("WARNING: GEMINI_API_KEY not set")
+# LLM Configuration - defaults to OpenRouter
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
+LLM_MODEL = os.getenv("LLM_MODEL", "deepseek/deepseek-chat")  # Try "deepseek/deepseek-chat" or "deepseek/deepseek-reasoner"
 
-MCP_SERVER_URL = "http://localhost:8001"
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8001")
 
 class QueryRequest(BaseModel):
-    question: str
+    question: str = Field(..., min_length=1, max_length=1000)
+    
+    @validator('question')
+    def validate_question(cls, v):
+        if not v.strip():
+            raise ValueError('Question cannot be empty')
+        return v.strip()
 
 class QueryResponse(BaseModel):
     answer: str
@@ -58,14 +65,25 @@ async def get_valid_token(user: User, db: Session) -> str:
     
     return token_entry.access_token
 
+def determine_query_type(question: str, optimized_context: dict) -> str:
+    """Determine query type for smart model selection."""
+    question_lower = question.lower()
+    
+    if any(word in question_lower for word in ['total', 'sum', 'average', 'how many', 'how much', 'count']):
+        return "aggregate"
+    elif any(word in question_lower for word in ['compare', 'vs', 'versus', 'difference', 'better', 'worse']):
+        return "comparison"
+    elif any(word in question_lower for word in ['analyze', 'trend', 'pattern', 'why', 'reason']):
+        return "analysis"
+    else:
+        return "general"
+
 @router.post("/query", response_model=QueryResponse)
 async def query_strava_data(
     request: QueryRequest, 
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if not GENAI_API_KEY:
-        raise HTTPException(status_code=500, detail="Gemini API not configured")
 
     # 1. Get Valid Token
     access_token = await get_valid_token(user, db)
@@ -78,103 +96,105 @@ async def query_strava_data(
     async with httpx.AsyncClient() as client:
         headers = {"X-Strava-Token": access_token}
         
-        # Parallel fetch could be better, but sequential for simplicity
+        # Parallel fetch for better performance
         try:
-            stats_resp = await client.get(f"{MCP_SERVER_URL}/athlete/stats", headers=headers)
-            activities_resp = await client.get(f"{MCP_SERVER_URL}/activities/summary", headers=headers, timeout=180.0)  # Summarized data for efficient queries
+            stats_resp, activities_resp = await asyncio.gather(
+                client.get(f"{MCP_SERVER_URL}/athlete/stats", headers=headers),
+                client.get(f"{MCP_SERVER_URL}/activities/summary", headers=headers, timeout=180.0)
+            )
         except httpx.RequestError as e:
              raise HTTPException(status_code=500, detail=f"Failed to connect to MCP server: {str(e)}")
 
+    stats_data = stats_resp.json() if stats_resp.status_code == 200 else {"error": "Failed to fetch stats"}
+    activity_summary_data = activities_resp.json() if activities_resp.status_code == 200 else {"error": "Failed to fetch activities"}
+    
     context_data = {
-        "stats": stats_resp.json() if stats_resp.status_code == 200 else {"error": "Failed to fetch stats"},
-        "activity_summary": activities_resp.json() if activities_resp.status_code == 200 else {"error": "Failed to fetch activities"}
+        "stats": stats_data,
+        "activity_summary": activity_summary_data
     }
     
-    # 3. Construct Prompt
-    # We provide the JSON data and the user question.
-    if not client:
-        return QueryResponse(answer="Gemini API not configured", data_used=context_data)
-        
-    # --- Context Optimization ---
-    # Filter specific activities based on the question to avoid hitting token limits
-    # 1. Always include the high-level summary (by_year)
-    # 2. Extract years from the question
-    # 3. If years found, include activities from those years. Else, include recent (last 90 days).
+    # 3. Optimize Context - Smart filtering to prevent context limits and minimize costs
+    optimizer = ContextOptimizer(
+        question=request.question,
+        activity_summary=activity_summary_data,
+        stats=stats_data
+    )
+    optimized_context = optimizer.optimize_context()
     
-    full_summary = context_data.get("activity_summary", {})
-    activities_by_date = full_summary.get("activities_by_date", {})
-    
-    years_found = re.findall(r'\b(20\d{2})\b', request.question)
-    relevant_activities = []
-    filter_reason = "Default: Recent activities (last 90 active days)"
-    
-    if years_found:
-        selected_years = set(years_found)
-        filter_reason = f"Filtered by years found in question: {', '.join(selected_years)}"
-        for date_str, activities in activities_by_date.items():
-            year = date_str.split('-')[0]
-            if year in selected_years:
-                for activity in activities:
-                    activity['date'] = date_str
-                    relevant_activities.append(activity)
-    else:
-        # Default: Last 90 days of recorded activities
-        sorted_dates = sorted(activities_by_date.keys(), reverse=True)
-        recent_dates = sorted_dates[:90]
-        for date_str in recent_dates:
-            activities = activities_by_date[date_str]
-            for activity in activities:
-                activity['date'] = date_str
-                relevant_activities.append(activity)
-                
-    optimized_context = {
-        "stats": context_data.get("stats"),
-        "summary_by_year": full_summary.get("by_year"),
-        "relevant_activities": relevant_activities,
-        "filter_note": filter_reason
-    }
+    # System instructions (reduces token cost, can be cached)
+    system_instruction = """You are a helpful assistant analyzing Strava fitness data.
 
-    prompt = f"""
-    You are a helpful assistant analyzing Strava fitness data.
+IMPORTANT INSTRUCTIONS:
+- Data is already in imperial units (miles and feet)
+- Always show distances in MILES only
+- Always show elevation in FEET only
+- For pace, show as minutes per mile (e.g., "8:30/mile")
+- When asked about a specific date, show ALL activities from that date
+- Format output using Markdown:
+  * Use bullet points (-) for lists
+  * Use **bold** for activity names or key stats
+- When comparing years, only compare matching time periods
+- Be precise with calculations
+- If data is incomplete, acknowledge this
+- Use summary_by_year for aggregate queries when detailed activities aren't provided
+- Provide concise and encouraging responses"""
+
+    # User prompt (minimal, dynamic content)
+    user_prompt = f"""=== USER QUESTION ===
+{request.question}
+=== END USER QUESTION ===
+
+=== DATA ===
+{optimized_context}
+=== END DATA ===
+
+Answer the user's question based on this data. If the answer cannot be determined from the data, say so."""
     
-    IMPORTANT INSTRUCTIONS:
-    - The raw data uses meters - you MUST convert to imperial units before responding
-    - Always show distances in MILES only (1 meter = 0.000621371 miles)
-    - Always show elevation in FEET only (1 meter = 3.28084 feet)
-    - Do NOT show metric values or conversion math - just give the final imperial values
-    - For pace, show as minutes per mile (e.g., "8:30/mile")
-    - When asked about a specific date, show ALL activities from that date, not just one
-    - Format output using Markdown:
-      * Use bullet points (-) for lists of activities
-      * Use **bold** for activity names or key stats
-      * Place each activity on a new line
-    - When comparing years, only compare data from matching time periods
-    - Be precise with calculations
-    - If data is incomplete, acknowledge this
-    
-    User Question: {request.question}
-    
-    Here is the RELEVANT Strava data (filtered to fit context limits):
-    {optimized_context}
-    
-    Please answer the user's question based on this data.
-    Use miles for distance and feet for elevation - do not show meters.
-    When asked about a date, list ALL activities from that date.
-    If the answer cannot be determined from the data, say so.
-    Provide a concise and encouraging response.
-    """
-    
-    # 4. Generate Answer
+    # 4. Generate Answer using LLM provider (OpenRouter, DeepSeek, or Gemini)
     try:
-        # Create client inside function to ensure correct context
-        gemini_client = genai.Client(api_key=GENAI_API_KEY)
-        response = await gemini_client.aio.models.generate_content(
-            model='gemini-2.0-flash-exp',
-            contents=prompt
+        llm = get_llm_provider()
+        
+        # Determine query type for smart model selection (OpenRouter only)
+        query_type = determine_query_type(request.question, optimized_context)
+        
+        answer_text = await llm.generate(
+            prompt=user_prompt,
+            system_instruction=system_instruction,
+            temperature=0.3,
+            max_tokens=2000,
+            query_type=query_type  # For smart model selection with OpenRouter
         )
-        answer_text = response.text
+    except ValueError as e:
+        # Configuration error
+        raise HTTPException(
+            status_code=500, 
+            detail=f"LLM configuration error: {str(e)}. Please check your API keys in .env"
+        )
     except Exception as e:
-        answer_text = f"Error generating answer: {str(e)}"
+        # Handle context limit errors gracefully
+        error_msg = str(e).lower()
+        error_str = str(e)
+        
+        # Log the full error for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"LLM generation error: {error_str}")
+        
+        if "context" in error_msg or "token" in error_msg or "length" in error_msg:
+            answer_text = f"I apologize, but the query requires too much data to process at once. Please try a more specific question or a shorter time range."
+        elif "404" in error_str or "not found" in error_msg:
+            # Check if it's an OpenRouter model availability issue
+            raise HTTPException(
+                status_code=500,
+                detail=f"Model not available: {error_str}. The model '{LLM_MODEL}' may not be accessible with your API key. Try a different model in .env (e.g., google/gemini-3-flash-preview)."
+            )
+        elif "api" in error_msg or "key" in error_msg or "auth" in error_msg:
+            raise HTTPException(
+                status_code=500,
+                detail=f"LLM API error: {error_str}. Please check your API key configuration."
+            )
+        else:
+            answer_text = f"Error generating answer: {error_str}"
     
     return QueryResponse(answer=answer_text, data_used=context_data)
 

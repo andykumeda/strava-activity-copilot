@@ -1,14 +1,11 @@
 import React from 'react';
 import { Activity } from 'lucide-react';
+import { API_ENDPOINTS } from '../config';
 
 const LandingPage: React.FC = () => {
     const handleConnect = async () => {
-        // Redirect to backend auth start
-        // In dev: http://localhost:5000/api/auth/strava/start
-        // We can fetch the URL or just redirect if we know the endpoint works as a GET/POST that returns JSON
-        // The backend `start` endpoint returns {url: "..."}
         try {
-            const response = await fetch('http://localhost:8000/api/auth/strava/start', { method: 'POST' });
+            const response = await fetch(API_ENDPOINTS.AUTH.START, { method: 'POST' });
             const data = await response.json();
             if (data.url) {
                 window.location.href = data.url;

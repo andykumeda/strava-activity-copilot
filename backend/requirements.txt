@@ -5,7 +5,9 @@ psycopg2-binary
 httpx
 python-jose[cryptography]
 google-generativeai
+openai
 python-dotenv
 requests
 pydantic
 pydantic-settings
+dateparser

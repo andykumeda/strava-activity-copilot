@@ -12,7 +12,15 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
             detail="Not authenticated",
         )
     
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    try:
+        user_id_int = int(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user ID",
+        )
+    
+    user = db.query(User).filter(User.id == user_id_int).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

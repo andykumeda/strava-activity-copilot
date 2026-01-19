@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Send, User as UserIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { User, Message } from '../types';
+import { API_ENDPOINTS } from '../config';
 
 interface DashboardProps {
     user: User;
@@ -23,7 +24,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         setLoading(true);
 
         try {
-            const res = await fetch('http://localhost:8000/api/query', {
+            const res = await fetch(API_ENDPOINTS.QUERY, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
