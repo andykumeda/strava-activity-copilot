@@ -97,29 +97,45 @@ class LLMProvider:
         max_tokens: int
     ) -> str:
         """Generate using OpenRouter API via httpx (more reliable than AsyncOpenAI)."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"OpenRouter Request: Model={model}, MaxTokens={max_tokens}")
+        
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": self.referer,
-                    "X-Title": "Strava Insight Portal",
-                },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-                timeout=60.0
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+            try:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": self.referer,
+                        "X-Title": "Strava Insight Portal",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_instruction},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                    timeout=60.0
+                )
+                response.raise_for_status()
+                data = response.json()
+                if "error" in data:
+                     logger.error(f"OpenRouter API returned error in JSON: {data}")
+                     raise ValueError(f"OpenRouter API Error: {data['error']}")
+                     
+                return data["choices"][0]["message"]["content"]
+            except httpx.HTTPStatusError as e:
+                logger.error(f"OpenRouter HTTP Error: {e.response.status_code} - {e.response.text}")
+                raise ValueError(f"OpenRouter HTTP Error {e.response.status_code}: {e.response.text}")
+            except Exception as e:
+                logger.error(f"OpenRouter Generic Error: {str(e)}")
+                raise
     
     async def _generate_deepseek(
         self,
