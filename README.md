@@ -20,7 +20,14 @@ A production-ready web application that lets users log in with Strava and ask na
 - **Secure Auth**: Uses HTTP-only, secure, signed JWT cookies for session management.
 - **Hardened API**: Strict CORS policies and rate limiting (`slowapi`) protect the backend.
 
+### 🏃‍♂️ Advanced Segment Analytics
+- **Best Time & PRs**: Authoritative "Best Time" retrieval directly from Strava (bypassing local cache for accuracy).
+- **Leaderboards**: Query "Who has the CR?" or "What is my rank on segment X?" (Requires Strava Premium for full leaderboards).
+- **History Lookup**: Ask "List all my previous times" to fetch your complete effort history for a specific segment.
+- **Direct Link Support**: Paste a Strava Segment URL to get instant stats, even if you haven't synced that activity yet.
+
 ### 💻 Modern UI
+- **Dark Mode**: Sleek, eye-friendly dark theme that automatically syncs with system preferences or can be toggled manually.
 - **Command History**: Use Up/Down arrows to cycle through previous queries.
 - **Async Input**: Type your next question while the previous one processes.
 - **Rich Formatting**: AI responses formatted with Markdown bullet points and bold text.

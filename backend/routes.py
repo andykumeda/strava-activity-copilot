@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import httpx
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm import Session
@@ -9,9 +10,10 @@ from datetime import datetime, timedelta
 from typing import Dict
 
 from .database import get_db
-from .models import User, Token
+from .models import User, Token, Segment
 from .deps import get_current_user
 from .context_optimizer import ContextOptimizer
+from .services.segment_service import save_segments_from_activity, get_best_efforts_for_segment
 from .llm_provider import get_llm_provider
 from .config import settings
 from .limiter import limiter
@@ -138,18 +140,132 @@ async def query_strava_data(
             optimized_context = optimizer.optimize_context()
             
             # Log the strategy for debugging
-            import logging
             logger = logging.getLogger(__name__)
             logger.info(f"Query: '{query.question}' | Strategy: {optimized_context.get('strategy')} | Note: {optimized_context.get('note')}")
 
+            # SEGMENT CONTEXT INJECTION
+            # Check if any persisted segments are mentioned in the query
+            try:
+                # 1. Check for basic fuzzy match names
+                all_segments = db.query(Segment).with_entities(Segment.id, Segment.name).all()
+                
+                # 2. Check for explicit Segment ID or URL in query
+                # Match https://www.strava.com/segments/12345 or just 12345 (if it looks like an ID context)
+                id_match = re.search(r'segments/(\d+)', query.question)
+                explicit_ids = [int(id_match.group(1))] if id_match else []
+
+                # Combine explicit IDs with text-matched IDs
+                matched_segments = []
+                for seg_id, seg_name in all_segments:
+                    if seg_name and seg_name.lower() in query.question.lower():
+                        matched_segments.append((seg_id, seg_name))
+                
+                # Add explicit IDs if not already found (fetches name dynamically if needed)
+                for eid in explicit_ids:
+                    if not any(eid == m[0] for m in matched_segments):
+                         matched_segments.append((eid, "Unknown Segment"))
+
+                found_segments_data = [] # Initialize here!
+                for seg_id, seg_name in matched_segments:
+                    logger.info(f"Processing segment: {seg_name} ({seg_id})")
+                        
+                    # Fetch authoritative segment details (including PR)
+                    segment_details = {}
+                    leaderboard_data = {}
+                    
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as seg_client:
+                            # A. Details
+                            seg_resp = await seg_client.get(
+                                f"{MCP_SERVER_URL}/segments/{seg_id}",
+                                headers=headers
+                            )
+                            if seg_resp.status_code == 200:
+                                segment_details = seg_resp.json()
+                                # Update name if it was unknown
+                                if seg_name == "Unknown Segment":
+                                    seg_name = segment_details.get("name", "Unknown Segment")
+                                logger.info(f"Fetched details for {seg_id}.")
+                            
+                            # B. Leaderboard (CR)
+                            if any(w in query.question.lower() for w in ['cr', 'kom', 'qom', 'leader', 'fastest', 'rank', 'who']):
+                                lb_resp = await seg_client.get(
+                                    f"{MCP_SERVER_URL}/segments/{seg_id}/leaderboard",
+                                    headers=headers
+                                )
+                                print(f"DEBUG: Leaderboard Status: {lb_resp.status_code}")
+                                if lb_resp.status_code == 200:
+                                    leaderboard_data = lb_resp.json()
+                                    print(f"DEBUG: Leaderboard Data: {leaderboard_data}")
+                                else:
+                                    print(f"DEBUG: Failed to fetch leaderboard: {lb_resp.text}")
+
+                    except Exception as e:
+                        print(f"DEBUG: Exception in segment fetch: {e}")
+
+                    # Check for history request
+                    segment_history = []
+                    if any(w in query.question.lower() for w in ['list', 'history', 'all times', 'previous times', 'efforts', 'past']):
+                             try:
+                                logger.info(f"Fetching full history for segment {seg_id}...")
+                                async with httpx.AsyncClient(timeout=10.0) as hist_client:
+                                    hist_resp = await hist_client.get(
+                                        f"{MCP_SERVER_URL}/segments/{seg_id}/efforts",
+                                        params={"per_page": 30},
+                                        headers=headers
+                                    )
+                                    if hist_resp.status_code == 200:
+                                        raw_history = hist_resp.json()
+                                        segment_history = [
+                                            {
+                                                "date": h.get("start_date_local", "Unknown")[:10],
+                                                "elapsed_time_seconds": h.get("elapsed_time"),
+                                                "moving_time_seconds": h.get("moving_time"),
+                                                "rank": h.get("kom_rank") or h.get("pr_rank")
+                                            } for h in raw_history
+                                        ]
+                                        logger.info(f"Fetched {len(segment_history)} historical efforts.")
+                             except Exception as e:
+                                logger.error(f"Failed to fetch history for segment {seg_id}: {e}")
+
+                    efforts = get_best_efforts_for_segment(seg_id, db)
+                    
+                    found_segments_data.append({
+                        "name": seg_name,
+                        "id": seg_id,
+                        "details": {
+                            "distance": segment_details.get("distance"),
+                            "average_grade": segment_details.get("average_grade"),
+                            "athlete_pr_effort": segment_details.get("athlete_pr_effort")
+                        },
+                        "leaderboard": {
+                            "top_entries": leaderboard_data.get("entries", [])[:3], # Top 3 leaders
+                            "entry_count": leaderboard_data.get("entry_count")
+                        },
+                        "history": segment_history, 
+                        "recent_db_efforts": [
+                            {
+                                "date": e.start_date.strftime("%Y-%m-%d") if e.start_date else "Unknown",
+                                "elapsed_time_seconds": e.elapsed_time,
+                                "pr_rank": e.pr_rank
+                            } for e in efforts
+                        ]
+                    })
+                
+                if found_segments_data:
+                    optimized_context["mentioned_segments"] = found_segments_data
+            except Exception as e:
+                logger.error(f"Segment lookup failed: {e}")
+
             # DETAIL ENRICHMENT:
-            # If the user asks about notes/descriptions and we have a small number of activities,
-            # fetch the full details (which contain private_note) to enrich the context.
-            # This overcomes the limitation that the summary list doesn't have notes.
+            # If the user asks about notes/descriptions OR we have a small number of activities (<= 5),
+            # fetch the full details (which contain private_note and segments) to enrich the context.
+            # This ensures segments are synced more often and short queries get high fidelity.
             relevant = optimized_context.get("relevant_activities", [])
             needs_enrichment = any(w in query.question.lower() for w in ['note', 'desc', 'pain', 'detail', 'mention', 'say', 'with'])
+            is_small_set = len(relevant) <= 5
             
-            if relevant and needs_enrichment and len(relevant) < 20:
+            if relevant and (needs_enrichment or is_small_set) and len(relevant) < 20:
                 logger.info(f"Enriching {len(relevant)} activities with full details (for notes/desc)...")
                 try:
                     async with httpx.AsyncClient(timeout=30.0) as detail_client:
@@ -169,11 +285,17 @@ async def query_strava_data(
                                 relevant[i]['description'] = detailed_data.get('description')
                                 # Also update name/type just in case
                                 relevant[i]['name'] = detailed_data.get('name')
+                                
+                                # Persist segments found in this detailed activity
+                                try:
+                                    save_segments_from_activity(detailed_data, db)
+                                except Exception as e:
+                                    logger.error(f"Failed to save segments for activity {detailed_data.get('id')}: {e}")
                 except Exception as e:
                     logger.error(f"Enrichment failed: {e}")
             
         except Exception as e:
-            import logging
+            # import logging (removed to avoid shadowing)
             logging.getLogger(__name__).error(f"Context optimization failed: {str(e)}", exc_info=True)
             # Fallback to simple context
             optimized_context = {
@@ -239,7 +361,7 @@ Answer the user's question based on this data. If the answer cannot be determine
             error_str = str(e)
             
             # Log the full error for debugging
-            import logging
+            # import logging (removed to avoid shadowing)
             logger = logging.getLogger(__name__)
             logger.error(f"LLM generation error: {error_str}")
             

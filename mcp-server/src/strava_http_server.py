@@ -308,6 +308,7 @@ async def get_activities_summary(x_strava_token: str = Header(..., alias="X-Stra
         moving_time = activity.get("moving_time", 0)
         
         activities_by_date[date_key].append({
+            "id": activity.get("id"),
             "name": activity.get("name", ""),
             "type": activity_type,
             "distance_miles": round(distance_miles, 2),
@@ -373,6 +374,35 @@ async def get_activities_summary(x_strava_token: str = Header(..., alias="X-Stra
 async def get_activity(activity_id: int, x_strava_token: str = Header(..., alias="X-Strava-Token")) -> Dict[str, Any]:
     """Get detailed activity data from Strava."""
     return await make_strava_request(f"{STRAVA_API_BASE_URL}/activities/{activity_id}", access_token=x_strava_token)
+
+@app.get("/segments/{segment_id}")
+async def get_segment(segment_id: int, x_strava_token: str = Header(..., alias="X-Strava-Token")) -> Dict[str, Any]:
+    """Get detailed segment data from Strava."""
+    return await make_strava_request(f"{STRAVA_API_BASE_URL}/segments/{segment_id}", access_token=x_strava_token)
+
+@app.get("/segments/{segment_id}/efforts")
+async def get_segment_efforts(segment_id: int, page: int = 1, per_page: int = 50, x_strava_token: str = Header(..., alias="X-Strava-Token")) -> List[Dict[str, Any]]:
+    """Get all efforts for a segment for the authenticated athlete."""
+    return await make_strava_request(
+        f"{STRAVA_API_BASE_URL}/segment_efforts",
+        params={"segment_id": segment_id, "page": page, "per_page": per_page},
+        access_token=x_strava_token
+    )
+
+@app.get("/segments/{segment_id}/leaderboard")
+async def get_segment_leaderboard(segment_id: int, gender: Optional[str] = None, weight_class: Optional[str] = None, x_strava_token: str = Header(..., alias="X-Strava-Token")) -> Dict[str, Any]:
+    """Get the leaderboard for a segment."""
+    params = {"per_page": 5} # Top 5 is usually enough for CR
+    if gender:
+        params["gender"] = gender
+    if weight_class:
+        params["weight_class"] = weight_class
+        
+    return await make_strava_request(
+        f"{STRAVA_API_BASE_URL}/segments/{segment_id}/leaderboard",
+        params=params,
+        access_token=x_strava_token
+    )
 
 @app.get("/athlete/stats")
 async def get_athlete_stats(x_strava_token: str = Header(..., alias="X-Strava-Token")) -> Dict[str, Any]:

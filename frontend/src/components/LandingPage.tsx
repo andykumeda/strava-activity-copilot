@@ -1,6 +1,7 @@
 import React from 'react';
 import { Activity } from 'lucide-react';
 import { API_ENDPOINTS } from '../config';
+import ThemeToggle from './ThemeToggle';
 
 const LandingPage: React.FC = () => {
     const handleConnect = async () => {
@@ -19,16 +20,22 @@ const LandingPage: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-            <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-4 transition-colors duration-200">
+            <div className="absolute top-4 right-4">
+                <ThemeToggle />
+            </div>
+            <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 text-center transition-colors duration-200">
                 <div className="flex justify-center mb-6">
-                    <div className="p-4 bg-orange-100 rounded-full">
+                    <div className="p-4 bg-orange-100 dark:bg-orange-900/30 rounded-full">
                         <Activity className="w-12 h-12 text-orange-600" />
                     </div>
                 </div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">Strava Insight Portal</h1>
-                <p className="text-gray-600 mb-8">
-                    Connect your Strava account to get AI-powered insights into your training history.
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">ActivityCopilot</h1>
+                <p className="text-xl font-medium text-gray-700 dark:text-gray-200 mb-2">
+                    Ask anything about your Strava training data.
+                </p>
+                <p className="text-gray-600 dark:text-gray-400 mb-8">
+                    ActivityCopilot connects to your Strava account and lets you chat with your activity history.
                 </p>
                 <button
                     onClick={handleConnect}

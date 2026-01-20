@@ -102,10 +102,25 @@ class ContextOptimizer:
                         print(f"ContextOptimizer: Parsed 'between' range: {start} to {end}")
                         return (start, end)
                 
+                # Cleanup possessives and noise words
+                clean_q = clean_q.replace("'s", "").replace("’s", "")
+                
+                # Remove common non-date words that confuse dateparser
+                noise_words = [
+                    "report", "show me", "my", "activity", "activities", "stats", "summary",
+                    "what were", "what were the", "what was", "what about", "list", "tell me about"
+                ]
+                for word in noise_words:
+                    clean_q = clean_q.replace(word, "").strip()
+                
+                # Strip distinct prefixes again just in case
                 for prefix in ["show me activities on", "show matches for", "activities on", "what happened on", "records for"]:
-                    if prefix in clean_q:
+                     if prefix in clean_q:
                         clean_q = clean_q.replace(prefix, "").strip()
                 
+                # Final cleanup of punctuation
+                clean_q = clean_q.replace("?", "").replace(".", "").strip()
+
                 print(f"ContextOptimizer: Attempting dateparser on cleaned '{clean_q}'", flush=True)
                 
                 if not clean_q:
@@ -113,6 +128,16 @@ class ContextOptimizer:
                     parsed = None
                 else:
                     parsed = dateparser.parse(clean_q, settings={'PREFER_DATES_FROM': 'past', 'STRICT_PARSING': False})
+                
+                # Fallback: If dateparser fails but we see "yesterday" or "today", force it
+                if not parsed:
+                    if "yesterday" in clean_q:
+                        print("ContextOptimizer: Fallback triggered for 'yesterday'")
+                        parsed = datetime.now() - timedelta(days=1)
+                    elif "today" in clean_q:
+                        print("ContextOptimizer: Fallback triggered for 'today'")
+                        parsed = datetime.now()
+
                 
                 if parsed:
                     # If a single date, return that day

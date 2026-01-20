@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean, TypeDecorator
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean, TypeDecorator, Float, BigInteger
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from cryptography.fernet import Fernet
@@ -53,3 +53,30 @@ class Token(Base):
     scope = Column(String, nullable=True)
 
     user = relationship("User", back_populates="tokens")
+
+class Segment(Base):
+    __tablename__ = "segments"
+
+    id = Column(BigInteger, primary_key=True, index=True)  # Strava Segment ID
+    name = Column(String, index=True)
+    distance = Column(Float)
+    average_grade = Column(Float, nullable=True)
+    city = Column(String, nullable=True)
+    
+    efforts = relationship("SegmentEffort", back_populates="segment", cascade="all, delete-orphan")
+
+class SegmentEffort(Base):
+    __tablename__ = "segment_efforts"
+
+    id = Column(BigInteger, primary_key=True, index=True)  # Strava Effort ID
+    segment_id = Column(BigInteger, ForeignKey("segments.id"), nullable=False)
+    activity_id = Column(BigInteger, index=True, nullable=False) # Strava Activity ID
+    
+    elapsed_time = Column(Integer)
+    moving_time = Column(Integer)
+    start_date = Column(DateTime)
+    
+    kom_rank = Column(Integer, nullable=True)
+    pr_rank = Column(Integer, nullable=True)
+
+    segment = relationship("Segment", back_populates="efforts")
