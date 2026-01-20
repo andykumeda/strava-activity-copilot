@@ -11,7 +11,7 @@ from .routes import router as api_router
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Strava Insight Portal")
+app = FastAPI(title="ActivityCopilot")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

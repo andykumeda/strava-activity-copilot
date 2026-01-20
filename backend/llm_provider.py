@@ -117,7 +117,7 @@ class LLMProvider:
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
                         "HTTP-Referer": self.referer,
-                        "X-Title": "Strava Insight Portal",
+                        "X-Title": "ActivityCopilot",
                     },
                     json={
                         "model": model,
