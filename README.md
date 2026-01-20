@@ -1,4 +1,4 @@
-# Strava Insight Portal
+# ActivityCopilot
 
 A production-ready web application that lets users log in with Strava and ask natural-language questions about their activity data using LLMs.
 

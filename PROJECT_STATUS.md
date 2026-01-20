@@ -3,7 +3,7 @@
 **Last Updated:** January 19, 2026
 
 ## 📋 Executive Summary
-The Strava Insight Portal is a robust, secure, and performant application allowing users to query their Strava data using LLMs. It features a React frontend, highly optimized FastAPI backend, and an asynchronous MCP server for Strava integration. The system is in a **Completed MVP** state with enterprise-grade security and modern infrastructure.
+The ActivityCopilot is a robust, secure, and performant application allowing users to query their Strava data using LLMs. It features a React frontend, highly optimized FastAPI backend, and an asynchronous MCP server for Strava integration. The system is in a **Completed MVP** state with enterprise-grade security and modern infrastructure.
 
 ---
 
