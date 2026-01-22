@@ -1,11 +1,12 @@
+
 import httpx
-import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-from .database import get_db
-from .models import User, Token
+
 from .config import settings
+from .database import get_db
+from .models import Token, User
 from .security import create_access_token
 
 router = APIRouter()
@@ -145,7 +146,8 @@ async def trigger_mcp_refresh(access_token: str):
             import logging
             logging.getLogger(__name__).error(f"Failed to trigger MCP refresh: {e}")
 
-from .deps import get_current_user
+from .deps import get_current_user  # noqa: E402
+
 
 @router.get("/me")
 def get_me(user: User = Depends(get_current_user)):

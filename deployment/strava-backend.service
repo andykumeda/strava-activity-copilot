@@ -1,12 +1,12 @@
 [Unit]
-Description=Strava Insight Portal Backend
+Description=Strava Activity Copilot Backend
 After=network.target
 
 [Service]
 User=andy
-WorkingDirectory=/var/www/strava-insight-portal
-EnvironmentFile=/var/www/strava-insight-portal/backend/.env
-ExecStart=/var/www/strava-insight-portal/venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+WorkingDirectory=/var/www/strava-activity-copilot
+EnvironmentFile=/var/www/strava-activity-copilot/backend/.env
+ExecStart=/var/www/strava-activity-copilot/venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
 Restart=always
 
 [Install]

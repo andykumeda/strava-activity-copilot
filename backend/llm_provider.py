@@ -4,9 +4,10 @@ Supports multiple LLM providers: OpenRouter, DeepSeek, Gemini
 Allows easy switching and cost optimization.
 """
 import os
-import httpx
-from typing import Optional, Literal
 from pathlib import Path
+from typing import Optional
+
+import httpx
 from dotenv import load_dotenv
 from google import genai
 from openai import AsyncOpenAI
@@ -33,8 +34,8 @@ class LLMProvider:
                 raise ValueError("OPENROUTER_API_KEY not set")
             
             # Securely log confirmation that the key is loaded
-            import logging
             import hashlib
+            import logging
             key_hash = hashlib.sha256(self.api_key.encode()).hexdigest()[:16]
             logging.getLogger("uvicorn").info(f"Loaded OpenRouter Key (sha256-hash: {key_hash})")
 

@@ -5,7 +5,7 @@
 # Defaults to 'andy' if no user provided.
 
 TARGET_USER="${1:-andy}"
-APP_DIR="/var/www/strava-insight-portal"
+APP_DIR="/var/www/strava-activity-copilot"
 
 echo "Setting up server for user: $TARGET_USER"
 
@@ -37,6 +37,6 @@ echo "After deployment configures files, run this to finish setup:"
 echo "  sudo cp $APP_DIR/deployment/*.service /etc/systemd/system/"
 echo "  sudo systemctl daemon-reload"
 echo "  sudo systemctl enable --now strava-backend strava-mcp"
-echo "  sudo cp $APP_DIR/deployment/nginx.conf /etc/nginx/sites-available/strava-insight"
-echo "  sudo ln -sf /etc/nginx/sites-available/strava-insight /etc/nginx/sites-enabled/"
+echo "  sudo cp $APP_DIR/deployment/nginx.conf /etc/nginx/sites-available/strava-activity-copilot"
+echo "  sudo ln -sf /etc/nginx/sites-available/strava-activity-copilot /etc/nginx/sites-enabled/"
 echo "  sudo systemctl restart nginx"

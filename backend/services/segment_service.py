@@ -1,8 +1,9 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-from typing import List, Optional
-from ..models import Segment, SegmentEffort
 import logging
+from typing import List
+
+from sqlalchemy.orm import Session
+
+from ..models import Segment, SegmentEffort
 
 logger = logging.getLogger(__name__)
 

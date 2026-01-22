@@ -1,11 +1,13 @@
 import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from .limiter import limiter
-from .database import engine, Base
+
 from .auth import router as auth_router
+from .database import Base, engine
+from .limiter import limiter
 from .routes import router as api_router
 
 # Create tables on startup
@@ -49,4 +51,4 @@ async def global_exception_handler(request, exc):
 
 @app.get("/")
 def read_root():
-    return {"message": "Strava Insight Portal API is running"}
+    return {"message": "Strava Activity Copilot API is running"}

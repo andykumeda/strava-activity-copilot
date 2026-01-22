@@ -9,6 +9,7 @@ import sys
 import time
 import asyncio
 from typing import Any, Dict, List, Optional
+from collections import defaultdict
 from datetime import datetime
 import logging
 from fastapi import FastAPI, HTTPException, Response, Header, BackgroundTasks
@@ -35,8 +36,44 @@ ACTIVITY_CACHE: Dict[str, Dict[str, Any]] = {}
 
 # Cache structure: {token: athlete_id}
 TOKEN_TO_ID_CACHE: Dict[str, str] = {}
+ATHLETE_LOCKS = defaultdict(asyncio.Lock)
 
+import json
+
+# Cache configuration
+CACHE_FILE = "strava_cache.json"
 CACHE_TTL_SECONDS = 300  # 5 minutes
+
+def format_seconds_to_str(seconds: int) -> str:
+    """Format seconds into Xh Ym string."""
+    if not seconds:
+        return "0s"
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    return f"{hours}h {minutes}m"
+
+def load_cache_from_disk():
+    """Load activity cache from disk."""
+    global ACTIVITY_CACHE
+    try:
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r') as f:
+                ACTIVITY_CACHE = json.load(f)
+            logger.info(f"Loaded {len(ACTIVITY_CACHE)} athletes from disk cache.")
+    except Exception as e:
+        logger.error(f"Failed to load disk cache: {e}")
+
+def save_cache_to_disk():
+    """Save activity cache to disk."""
+    try:
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(ACTIVITY_CACHE, f)
+        logger.info("Saved cache to disk.")
+    except Exception as e:
+        logger.error(f"Failed to save disk cache: {e}")
+
+# Load cache on startup
+load_cache_from_disk()
 
 # Create FastAPI app
 app = FastAPI(
@@ -93,6 +130,8 @@ async def make_strava_request(url: str, method: str = "GET", params: Dict[str, A
             except httpx.RequestError as e:
                 logger.error(f"Strava API connection error: {str(e)}")
                 raise HTTPException(status_code=500, detail=f"Connection error: {str(e)}")
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.error(f"Unexpected error during Strava request: {str(e)}")
                 raise HTTPException(status_code=500, detail=str(e))
@@ -165,70 +204,98 @@ async def _fetch_all_activities_logic(x_strava_token: str, refresh: bool) -> Lis
             return cache_entry["activities"]
     
     # Fetch all activities with pagination
-    all_activities = []
-    page = 1
-    
-    try:
-        while True:
-            params = {"per_page": 200, "page": page}
-            logger.info(f"Fetching activities page {page}...")
+    # Use lock to prevent concurrent full-history fetches for the same athlete
+    async with ATHLETE_LOCKS[athlete_id]:
+        # Double-check cache after acquiring lock!
+        if athlete_id in ACTIVITY_CACHE:
+            cache_entry = ACTIVITY_CACHE[athlete_id]
+            age = time.time() - cache_entry["fetched_at"]
+            if age < CACHE_TTL_SECONDS and not refresh:
+                logger.info(f"Returning {len(cache_entry['activities'])} cached activities for athlete {athlete_id} (acquired lock)")
+                return cache_entry["activities"]
             
-            try:
-                activities = await make_strava_request(
-                    f"{STRAVA_API_BASE_URL}/athlete/activities",
-                    params=params, 
-                    access_token=x_strava_token
-                )
-            except HTTPException as e:
-                # Check if it's a rate limit error (429)
-                if e.status_code == 429:
-                    logger.warning(f"Rate limit hit at page {page}. Pausing for 60 seconds...")
-                    await asyncio.sleep(60) # Async sleep!
-                    try:
-                         # Retry once
-                         activities = await make_strava_request(
-                            f"{STRAVA_API_BASE_URL}/athlete/activities",
-                            params=params,
-                            access_token=x_strava_token
-                         )
-                    except Exception as retry_e:
-                        logger.error(f"Retry failed: {retry_e}. Returning partial activities.")
-                        break 
-                else:
-                    logger.error(f"Error fetching page {page}: {e}. Returning partial activities.")
-                    break
-            except Exception as e:
-                logger.error(f"Unexpected error fetching page {page}: {e}")
-                break
-            
-            if not isinstance(activities, list) or not activities:
-                break
-                
-            all_activities.extend(activities)
-            logger.info(f"Fetched {len(activities)} activities (Total: {len(all_activities)})")
-            
-            if len(activities) < 200:
-                break
-                
-            page += 1
-            # Respect rate limits - pause slightly
-            await asyncio.sleep(1)
-            
-    except Exception as outer_e:
-        logger.error(f"Fatal error in pagination loop: {outer_e}")
+            # If we just want to read but cache is stale, return it anyway to avoid blocking
+            if not refresh and "activities" in cache_entry:
+                 logger.info(f"Cache stale but available. Returning {len(cache_entry['activities'])} activities for athlete {athlete_id} (acquired lock)")
+                 return cache_entry["activities"]
+
+        all_activities = []
+        page = 1
         
-    # Save to cache if we got results
-    if all_activities:
-        ACTIVITY_CACHE[athlete_id] = {
-            "activities": all_activities,
-            "fetched_at": time.time()
-        }
-        dates = [a.get("start_date", "") for a in all_activities]
-        dates.sort()
-        if dates:
-            logger.info(f"Fetched {len(all_activities)} activities. Range: {dates[0]} to {dates[-1]}")
+        try:
+            while True:
+                params = {"per_page": 200, "page": page}
+                logger.info(f"Fetching activities page {page}...")
+                
+                try:
+                    activities = await make_strava_request(
+                        f"{STRAVA_API_BASE_URL}/athlete/activities",
+                        params=params, 
+                        access_token=x_strava_token
+                    )
+                except HTTPException as e:
+                    # Check if it's a rate limit error (429)
+                    if e.status_code == 429:
+                        logger.warning(f"Rate limit hit at page {page}. Pausing for 60 seconds...")
+                        await asyncio.sleep(60) # Async sleep!
+                        try:
+                             # Retry once
+                             activities = await make_strava_request(
+                                f"{STRAVA_API_BASE_URL}/athlete/activities",
+                                params=params,
+                                access_token=x_strava_token
+                             )
+                        except Exception as retry_e:
+                            logger.error(f"Retry failed: {retry_e}. Returning partial activities.")
+                            break 
+                    else:
+                        logger.error(f"Error fetching page {page}: {e}. Returning partial activities.")
+                        break
+                except Exception as e:
+                    logger.error(f"Unexpected error fetching page {page}: {e}")
+                    break
+                
+                if not isinstance(activities, list) or not activities:
+                    break
+                    
+                all_activities.extend(activities)
+                logger.info(f"Fetched {len(activities)} activities (Total: {len(all_activities)})")
+                
+                if len(activities) < 200:
+                    break
+                    
+                page += 1
+                # Respect rate limits - pause slightly
+                await asyncio.sleep(1)
+                
+        except Exception as outer_e:
+            logger.error(f"Fatal error in pagination loop: {outer_e}")
+            
+        # Save to cache if we got results
+        if all_activities:
+            ACTIVITY_CACHE[athlete_id] = {
+                "activities": all_activities,
+                "fetched_at": time.time()
+            }
+            save_cache_to_disk()
+            dates = [a.get("start_date", "") for a in all_activities]
+            dates.sort()
+            if dates:
+                logger.info(f"Fetched {len(all_activities)} activities. Range: {dates[0]} to {dates[-1]}")
     
     logger.info(f"Fetched and cached {len(all_activities)} total activities for athlete {athlete_id}")
+    
+    # Trigger background hydration automatically
+    # Use create_task to fire and forget
+    try:
+        if not HYDRATION_LOCK.locked():
+             logger.info("Triggering automatic background hydration...")
+             asyncio.create_task(hydrate_activities_background(x_strava_token))
+        else:
+             logger.info("Hydration already in progress.")
+    except Exception:
+        pass # Don't block
+        
     return all_activities
 
 @app.get("/activities/all")
@@ -240,11 +307,133 @@ async def get_all_activities(x_strava_token: str = Header(..., alias="X-Strava-T
 async def refresh_activities(x_strava_token: str = Header(..., alias="X-Strava-Token"), background_tasks: BackgroundTasks = None):
     """Trigger a background refresh of the activity cache."""
     
+
+# Global lock for hydration to prevent concurrent runs
+HYDRATION_LOCK = asyncio.Lock()
+
+async def hydrate_activities_background(token: str):
+    """Background task to fetch full details for activities."""
+    # Ensure we don't run multiple concurrent hydrations
+    if HYDRATION_LOCK.locked():
+        logger.info("Hydration already in progress. Skipping trigger.")
+        return
+
+    async with HYDRATION_LOCK:
+        logger.info("Starting background hydration of activity details...")
+        
+        # Re-read cache
+        athlete_id = TOKEN_TO_ID_CACHE.get(token)
+        if not athlete_id or athlete_id not in ACTIVITY_CACHE:
+             # Try to fetch athlete ID if missing (should be cached by now)
+             return
+
+        activities = ACTIVITY_CACHE[athlete_id].get("activities", [])
+        
+        # Identify candidates: activities matching "Jessica" should be prioritized if we could search them?
+        # But we can't search them. So we rely on the heuristic.
+        # Candidates: missing 'description'
+        candidates = [a for a in activities if "description" not in a or a["description"] is None]
+        
+        if not candidates:
+            return
+
+        logger.info(f"Found {len(candidates)} activities needing hydration.")
+        
+        # Priority Scoring
+        def priority_score(act):
+            name = act.get('name', '').lower()
+            score = 0
+            
+            # Keywords
+            if any(w in name for w in ['race', 'marathon', '5k', '10k', '50k', '100k', '100m', 'run', 'trail']):
+                score += 10
+            if 'angeles' in name or 'crest' in name:
+                score += 100
+                
+            # Social Signals (Notes often appear on social runs)
+            kudos = act.get('kudos_count', 0)
+            comments = act.get('comment_count', 0)
+            if kudos > 5:
+                score += 5
+            if kudos > 20:
+                score += 10
+            if comments > 0:
+                score += 20 # High priority if discussions are blocked on hydration
+                
+            # Date Recency Boost (Last 30 days get huge priority)
+            start_date = act.get('start_date', '')  # 2024-01-01T...
+            if start_date > datetime.now().strftime("%Y-%m-%d"): # Future? unlikely
+                pass
+            
+            # Simple string comparison works for ISO dates to find recent years
+            # But let's be more precise if possible, or just use simple string check for current year
+            current_year = datetime.now().year
+            if str(current_year) in start_date:
+                score += 50
+                # Super recent (last few months)?
+                # We can just sort by date as tiebreaker, but let's give a boost to avoid getting stuck
+                # on old high-kudos runs.
+                score += 200 
+            elif str(current_year - 1) in start_date:
+                score += 20
+                
+            return (score, start_date)
+        
+        candidates.sort(key=priority_score, reverse=True)
+        
+        hydrated_count = 0
+        # We can't do ALL of them if there are thousands.
+        # Let's do a batch of 50 to avoid holding the lock forever?
+        # No, we want to run until done or stopped.
+        # We will check if we should stop? No.
+        
+        for act in candidates:
+            act_id = act['id']
+            try:
+                # Rate limit: 1 request every 2 seconds provided we are authenticated user
+                # Strava limit: 100/15 min => 1 req / 9s.
+                # Safe: 10s.
+                await asyncio.sleep(10)
+                
+                logger.info(f"Hydrating activity {act_id} ({act.get('name')})...")
+                detail = await make_strava_request(
+                        f"{STRAVA_API_BASE_URL}/activities/{act_id}",
+                        access_token=token
+                )
+                
+                # Update in place
+                act['description'] = detail.get('description', '')
+                act['private_note'] = detail.get('private_note', '')
+                act['segment_efforts'] = detail.get('segment_efforts', [])
+                act['similar_activities'] = detail.get('similar_activities') # Store full object or dict
+                act['athlete_count'] = detail.get('athlete_count', 1)
+                act['hydrated_at'] = time.time()
+                
+                hydrated_count += 1
+                
+                if hydrated_count % 5 == 0:
+                    save_cache_to_disk()
+                    
+            except Exception as e:
+                logger.error(f"Failed to hydrate {act_id}: {e}")
+                
+        save_cache_to_disk()
+        logger.info(f"Hydration complete. {hydrated_count} activities updated.")
+
+@app.post("/activities/refresh")
+async def refresh_activities(x_strava_token: str = Header(..., alias="X-Strava-Token"), background_tasks: BackgroundTasks = None):
+    """Trigger a background refresh of the activity cache."""
+    
     async def _do_refresh(token):
         logger.info("Starting background activity refresh...")
         try:
+            # 1. Fetch latest summary list
             await _fetch_all_activities_logic(token, refresh=True)
             logger.info("Background refresh complete.")
+            
+            # 2. Trigger Hydration
+            asyncio.create_task(hydrate_activities_background(token))
+
         except Exception as e:
             logger.error(f"Background refresh failed: {e}")
 
@@ -261,6 +450,13 @@ async def get_activities_summary(x_strava_token: str = Header(..., alias="X-Stra
     """Get a summarized view of all activities for efficient AI queries. Returns aggregated data by year/month."""
     # Get all activities (will use cache if available)
     all_activities = await get_all_activities(x_strava_token)
+    
+    # Trigger background hydration logic
+    # This ensures that even if we hit cache, we verify if hydration is needed
+    try:
+         asyncio.create_task(hydrate_activities_background(x_strava_token))
+    except Exception:
+         pass
     
     # Group activities by year and month
     by_year: Dict[str, Dict[str, Any]] = {}
@@ -314,16 +510,14 @@ async def get_activities_summary(x_strava_token: str = Header(..., alias="X-Stra
             "distance_miles": round(distance_miles, 2),
             "elevation_feet": round(elevation_feet, 0),
             "moving_time_seconds": moving_time,
+            "elapsed_time_seconds": activity.get("elapsed_time", 0),
+            "elapsed_time_str": format_seconds_to_str(activity.get("elapsed_time", 0)),
             "start_time": start_date,
             "private_note": activity.get("private_note", ""),
-            "description": activity.get("description", "")
+            "description": activity.get("description", ""),
+            "athlete_count": activity.get("athlete_count", 1),
+            "route_match_count": activity.get("similar_activities", {}).get("effort_count", 0) if activity.get("similar_activities") else 0
         })
-        
-    # Debug log to check if private notes are being captured
-    if all_activities:
-        has_notes = sum(1 for a in all_activities if a.get("private_note"))
-        has_desc = sum(1 for a in all_activities if a.get("description"))
-        logger.info(f"Summary generation: {has_notes} notes, {has_desc} descriptions out of {len(all_activities)}")
         
         # Update year totals
         by_year[year]["total_activities"] += 1
@@ -407,12 +601,40 @@ async def get_segment_leaderboard(segment_id: int, gender: Optional[str] = None,
 @app.get("/athlete/stats")
 async def get_athlete_stats(x_strava_token: str = Header(..., alias="X-Strava-Token")) -> Dict[str, Any]:
     """Get athlete statistics from Strava."""
-    # First get athlete ID
-    athlete = await make_strava_request(f"{STRAVA_API_BASE_URL}/athlete", access_token=x_strava_token)
-    athlete_id = athlete["id"]
+    global ACTIVITY_CACHE, TOKEN_TO_ID_CACHE
+
+    # 1. Get Athlete ID (Cached)
+    athlete_id = TOKEN_TO_ID_CACHE.get(x_strava_token)
+    if not athlete_id:
+        # Fetch if not in memory cache
+        athlete = await make_strava_request(f"{STRAVA_API_BASE_URL}/athlete", access_token=x_strava_token)
+        athlete_id = str(athlete["id"])
+        TOKEN_TO_ID_CACHE[x_strava_token] = athlete_id
     
-    # Then get stats
-    return await make_strava_request(f"{STRAVA_API_BASE_URL}/athletes/{athlete_id}/stats", access_token=x_strava_token)
+    # 2. Check Cache for Stats
+    current_time = time.time()
+    if athlete_id in ACTIVITY_CACHE:
+        cache_entry = ACTIVITY_CACHE[athlete_id]
+        stats = cache_entry.get("stats")
+        stats_fetched_at = cache_entry.get("stats_fetched_at", 0)
+        
+        # 15 minute TTL for stats
+        if stats and (current_time - stats_fetched_at) < 900:
+            logger.info(f"Returning cached stats for athlete {athlete_id}")
+            return stats
+
+    # 3. Fetch from API
+    stats_data = await make_strava_request(f"{STRAVA_API_BASE_URL}/athletes/{athlete_id}/stats", access_token=x_strava_token)
+    
+    # 4. Save to Cache
+    if athlete_id not in ACTIVITY_CACHE:
+        ACTIVITY_CACHE[athlete_id] = {}
+    
+    ACTIVITY_CACHE[athlete_id]["stats"] = stats_data
+    ACTIVITY_CACHE[athlete_id]["stats_fetched_at"] = current_time
+    save_cache_to_disk()
+    
+    return stats_data
 
 @app.get("/activities/{activity_id}/map")
 async def get_activity_with_map(activity_id: int, format: str = 'html', x_strava_token: str = Header(..., alias="X-Strava-Token")) -> Response:

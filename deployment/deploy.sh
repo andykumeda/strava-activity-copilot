@@ -5,7 +5,7 @@ set -e
 # You can override these with environment variables
 REMOTE_USER="${REMOTE_USER:-ubuntu}"
 REMOTE_HOST="${REMOTE_HOST:-your-server-ip}"
-REMOTE_PATH="${REMOTE_PATH:-/var/www/strava-insight-portal}"
+REMOTE_PATH="${REMOTE_PATH:-/var/www/strava-activity-copilot}"
 SSH_PORT="${SSH_PORT:-22}" # Default to 22, override with 420
 SSH_KEY="${SSH_KEY:-}" # Optional: path to private key
 

@@ -4,9 +4,11 @@ Handles context limits, token counting, and intelligent data filtering.
 """
 import json
 import re
-from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
 import dateparser
+from dateparser.search import search_dates
 
 
 class ContextOptimizer:
@@ -123,11 +125,43 @@ class ContextOptimizer:
 
                 print(f"ContextOptimizer: Attempting dateparser on cleaned '{clean_q}'", flush=True)
                 
-                if not clean_q:
-                    print("ContextOptimizer: Query empty after cleaning", flush=True)
-                    parsed = None
-                else:
-                    parsed = dateparser.parse(clean_q, settings={'PREFER_DATES_FROM': 'past', 'STRICT_PARSING': False})
+                parsed = None
+                if clean_q:
+                    # Use search_dates to find dates embedded in text
+                    found = search_dates(clean_q, settings={'PREFER_DATES_FROM': 'past', 'STRICT_PARSING': False})
+                    
+                    valid_date = None
+                    if found:
+                        # Filter out noise (e.g., "16th running", "time")
+                        for match_text, date_obj in found:
+                            match_lower = match_text.lower()
+                            
+                            # Ignore specific noise words
+                            if match_lower in ['time', 'date', 'stats', 'runs']:
+                                continue
+                                
+                            # Ignore bare ordinals if they look like edition numbers (e.g. "16th", "1st")
+                            # unless they clearly look like part of a date context which dateparser usually captures as a longer string
+                            # If the match is JUST "16th" and followed by "running/edition", ignore it.
+                            # Ignore bare ordinals if they look like edition numbers (e.g. "16th", "1st")
+                            # If the match is strictly digits + suffix, and dateparser didn't grab surrounding context (like "of January"),
+                            # then it is almost certainly NOT a date intent in this context (usually an edition or rank).
+                            is_ordinal = re.match(r'^\d+(st|nd|rd|th)$', match_lower)
+                            if is_ordinal:
+                                print(f"ContextOptimizer: Ignoring ordinal date '{match_text}' (aggressive filter)")
+                                continue
+                                    
+                            # Determine if this looks valid
+                            print(f"ContextOptimizer: Found potential date '{match_text}' -> {date_obj}")
+                            valid_date = date_obj
+                            break # Use first valid date
+                            
+                    if valid_date:
+                        print(f"ContextOptimizer: Accepted date: {valid_date}")
+                        parsed = valid_date
+                    else:
+                        # Fallback to direct parse just in case
+                        parsed = dateparser.parse(clean_q, settings={'PREFER_DATES_FROM': 'past', 'STRICT_PARSING': False})
                 
                 # Fallback: If dateparser fails but we see "yesterday" or "today", force it
                 if not parsed:
@@ -200,13 +234,22 @@ class ContextOptimizer:
             return (start, end)
         
         # Try dateparser for specific dates
+        # Try dateparser for specific dates (fallback)
         try:
-            parsed = dateparser.parse(self.question, settings={'PREFER_DATES_FROM': 'past'})
-            if parsed:
-                # If a single date, return that day
-                return (parsed.replace(hour=0, minute=0, second=0), 
-                       parsed.replace(hour=23, minute=59, second=59))
-        except:
+            found = search_dates(self.question, settings={'PREFER_DATES_FROM': 'past'})
+            if found:
+                # Apply same filtering logic
+                for match_text, date_obj in found:
+                    match_lower = match_text.lower()
+                    if match_lower in ['time', 'date']: continue
+                    if re.match(r'^\d+(st|nd|rd|th)$', match_lower):
+                         continue
+                    
+                    parsed = date_obj
+                    # If a single date, return that day
+                    return (parsed.replace(hour=0, minute=0, second=0), 
+                           parsed.replace(hour=23, minute=59, second=59))
+        except Exception:
             pass
         
         # Default: return None (will use summary-only approach)
@@ -245,6 +288,27 @@ class ContextOptimizer:
         print(f"ContextOptimizer: Filtered {len(filtered)} activities from {len(self.activities_by_date)} days.")
         return filtered
     
+    def calculate_relevance(self, activity: Dict[str, Any]) -> Tuple[int, str]:
+        """
+        Calculate relevance score for an activity against the query.
+        Returns tuple (score, start_time) for sorting.
+        """
+        score = 0
+        name = str(activity.get('name', '')).lower()
+        note = str(activity.get('private_note', '')).lower()
+        desc = str(activity.get('description', '')).lower()
+        full_text = f"{name} {note} {desc}"
+        
+        # Keywords from query (excluding stop words)
+        stop_words = {'what', 'was', 'the', 'list', 'all', 'segments', 'from', 'at', 'in', 'on', 'my', 'run', 'ride', 'how', 'many', 'activities', 'have', 'been'}
+        query_words = [w for w in self.question.split() if w not in stop_words]
+        
+        for w in query_words:
+            if w in full_text:
+                score += 10
+                
+        return (score, activity.get('start_time', ''))
+
     def filter_by_keyword(self, activities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filter activities by keywords found in quotes or after 'with'/'contains'."""
         question_lower = self.question.lower()
@@ -256,15 +320,11 @@ class ContextOptimizer:
         quotes = re.findall(r"['\"](.*?)['\"]", question_lower)
         keywords.extend(quotes)
         
-        # 2. Simple "with <word>" detection could be too aggressive, stick to quotes or specific phrases for now.
-        # But let's try to capture "mentions X" or "note says X" if not quoted.
+        # 2. Simple "with <word>" detection
         if not keywords:
-            # Regex to catch "notes for X", "mentioning X", "contains X", "with X"
-            # Handles optional prepositions like "for", "about", "that"
             match = re.search(r"(?:contain\w*|mention\w*|note\w*|desc\w*|say\w*|with)\s+(?:for|about|that)?\s*['\"]?(\w+)['\"]?", question_lower)
             if match:
                 word = match.group(1)
-                # Blacklist of common words that might follow these triggers but aren't keywords
                 blacklist = ['activities', 'runs', 'rides', 'the', 'a', 'an', 'my', 'me', 'in', 'on']
                 if word not in blacklist:
                     keywords.append(word)
@@ -275,14 +335,12 @@ class ContextOptimizer:
         print(f"ContextOptimizer: Filtering by keywords: {keywords}")
         filtered = []
         for activity in activities:
-            # Check fields
             text_content = (
                 str(activity.get('name', '')) + " " + 
                 str(activity.get('private_note', '')) + " " + 
                 str(activity.get('description', ''))
             ).lower()
             
-            # Simple match: if ANY keyword is in the text
             if any(k in text_content for k in keywords):
                 filtered.append(activity)
                 
@@ -305,32 +363,6 @@ class ContextOptimizer:
         # Determine what level of detail is needed
         date_range = self.parse_date_range()
         
-        # Check if question explicitly needs a list or specific details
-        needs_list = any(phrase in self.question for phrase in [
-            'list', 'show', 'what did i do', 'details', 'specific', 'names', 'title', 'find', 'search', 'which'
-        ])
-        
-        # Check if question just mentions an activity type (which can be answered by summary now)
-        mentions_activity = any(phrase in self.question for phrase in [
-            'activity', 'activities', 'run', 'ride', 'workout', 'training', 'walk', 'hike', 'swim'
-        ])
-        
-        # Check if question is about aggregates (can use summaries)
-        is_aggregate = any(phrase in self.question for phrase in [
-            'total', 'sum', 'average', 'compare', 'statistics', 'stats',
-            'how many', 'how much', 'total distance', 'total time', 'count'
-        ])
-        
-        # Strategy: Use summaries for aggregates, details for specific queries
-        # If it's an aggregate question ("how many runs"), we can use summary now that it has type breakdowns!
-        # Force summary_only if it's an aggregate query and doesn't explicitly ask for a list.
-        if is_aggregate and not needs_list:
-            optimized["strategy"] = "summary_only"
-            optimized["note"] = "Aggregates use monthly/yearly summaries"
-            optimized["summary_by_year"] = self.by_year  # Include summary for this strategy
-            print(f"ContextOptimizer: Chosen strategy: {optimized['strategy']} (Aggregates)")
-            return optimized
-        
         # Get filtered activities (Date Range)
         if date_range:
             start_date, end_date = date_range
@@ -343,9 +375,32 @@ class ContextOptimizer:
             relevant_activities = self.filter_activities_by_date_range(None, None)
             
         # Apply Keyword Filtering (Content)
-        # This allows "find runs with 'pain'" to work over the entire history (or date range)
-        # BEFORE we truncate for context limits.
+        # This allows "find runs with 'pain'" or "how many runs mention '16th'" to work over history
+        pre_keyword_count = len(relevant_activities)
         relevant_activities = self.filter_by_keyword(relevant_activities)
+        has_keywords = len(relevant_activities) < pre_keyword_count
+
+        # Check if question explicitly needs a list or specific details
+        needs_list = any(phrase in self.question for phrase in [
+            'list', 'show', 'what did i do', 'details', 'specific', 'names', 'title', 'find', 'search', 'which'
+        ])
+        
+        # Check if question is about aggregates (can use summaries)
+        is_aggregate = any(phrase in self.question for phrase in [
+            'total', 'sum', 'average', 'compare', 'statistics', 'stats',
+            'how many', 'how much', 'total distance', 'total time', 'count'
+        ])
+        
+        # Strategy: Use summaries for aggregates, details for specific queries
+        # If it's an aggregate question ("how many runs"), we can use summary now that it has type breakdowns!
+        # Force summary_only if it's an aggregate query and doesn't explicitly ask for a list AND no keywords were used.
+        # If keywords were used (has_keywords), we MUST show the filtered list so LLM can count them.
+        if is_aggregate and not needs_list and not has_keywords:
+            optimized["strategy"] = "summary_only"
+            optimized["note"] = "Aggregates use monthly/yearly summaries"
+            optimized["summary_by_year"] = self.by_year  # Include summary for this strategy
+            print(f"ContextOptimizer: Chosen strategy: {optimized['strategy']} (Aggregates)")
+            return optimized
         
         # Estimate token usage
         base_tokens = self.estimate_tokens(optimized)
@@ -380,7 +435,7 @@ class ContextOptimizer:
                         optimized["strategy"] = "specific_date"
                         optimized["note"] = f"Showing activities for {date_key} only"
                         return optimized
-            except:
+            except Exception:
                 pass
         
         # Strategy 2: Limit to most recent N activities (within date range or all time)
@@ -389,7 +444,9 @@ class ContextOptimizer:
             
             # Sort by date (most recent first) and limit
             # Note: filter_by_keyword might have already reduced the list significantly!
-            relevant_activities.sort(key=lambda x: x.get('start_time', ''), reverse=True)
+            # Sort by Relevance Score + Date
+            # This ensures "Angeles Crest" (matches query) floats to top even if old!
+            relevant_activities.sort(key=self.calculate_relevance, reverse=True)
             
             # Recalculate available tokens
             available_tokens = self.MAX_CONTEXT_TOKENS - base_tokens - self.TOKEN_OVERHEAD

@@ -1,23 +1,26 @@
+import asyncio
+import json
+import logging
 import os
 import re
-import asyncio
-import httpx
-import logging
-import json
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, validator
-from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict
 
-from .database import get_db
-from .models import User, Token, Segment
-from .deps import get_current_user
-from .context_optimizer import ContextOptimizer
-from .services.segment_service import save_segments_from_activity, get_best_efforts_for_segment
-from .llm_provider import get_llm_provider
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, validator
+from sqlalchemy.orm import Session
+
 from .config import settings
+from .context_optimizer import ContextOptimizer
+from .database import get_db
+from .deps import get_current_user
 from .limiter import limiter
+from .llm_provider import get_llm_provider
+from .models import Segment, Token, User
+from .services.segment_service import get_best_efforts_for_segment, save_segments_from_activity
+
 router = APIRouter()
 
 # LLM Configuration - defaults to OpenRouter
@@ -116,9 +119,18 @@ async def query_strava_data(
             # Parallel fetch for better performance
             try:
                 stats_resp, activities_resp = await asyncio.gather(
-                    client.get(f"{MCP_SERVER_URL}/athlete/stats", headers=headers),
+                    client.get(f"{MCP_SERVER_URL}/athlete/stats", headers=headers, timeout=60.0),
                     client.get(f"{MCP_SERVER_URL}/activities/summary", headers=headers, timeout=180.0)
                 )
+                
+                # Check directly for Rate Limits before processing
+                if stats_resp.status_code == 429 or activities_resp.status_code == 429:
+                    return JSONResponse(content={
+                        "answer": "**Strava API Rate Limit Reached** 🚦\n\nStrava is currently limiting requests due to high traffic (likely during testing or full history sync). Please try again in approximately 15 minutes.\n\n*System Note: The backend is preventing further requests to avoid API bans.*",
+                        "context": {},
+                        "model": "system-alert"
+                    })
+
             except httpx.RequestError as e:
                  raise HTTPException(status_code=500, detail=f"Failed to connect to MCP server: {str(e)}")
 
@@ -272,43 +284,78 @@ async def query_strava_data(
             needs_enrichment = any(w in query.question.lower() for w in ['note', 'desc', 'pain', 'detail', 'mention', 'say', 'with', 'segment'])
             is_small_set = len(relevant) <= 5
             
-            if relevant and (needs_enrichment or is_small_set) and len(relevant) < 50:
-                logger.info(f"Enriching {len(relevant)} activities with full details (for notes/desc/segments)...")
+            if relevant and (needs_enrichment or is_small_set):
+                # Prioritize activities that match query terms for enrichment
+                # This ensures "Angeles Crest" query enriches the Angeles Crest activity, not just the most recent run.
+                try:
+                    query_lower = query.question.lower()
+                    def relevance_score(act):
+                        score = 0
+                        name = str(act.get('name', '')).lower()
+                        note = str(act.get('private_note', '')).lower()
+                        desc = str(act.get('description', '')).lower()
+                        
+                        # Combine text for searching
+                        full_text = f"{name} {note} {desc}"
+                        
+                        # Simple scoring: +10 if text contains a word from the query (excluding common words)
+                        # excluding stop words
+                        stop_words = {'what', 'was', 'the', 'list', 'all', 'segments', 'from', 'at', 'in', 'on', 'my', 'run', 'ride'}
+                        query_words = [w for w in query_lower.split() if w not in stop_words]
+                        
+                        for w in query_words:
+                            if w in full_text:
+                                score += 10
+                        
+                        # Tie breaker: date (recent first)
+                        return (score, act.get('start_time', ''))
+
+                    # Sort descended by relevance score
+                    relevant.sort(key=relevance_score, reverse=True)
+                except Exception as e:
+                    logger.error(f"Relevance sorting failed: {e}")
+
+                # CAP ENRICHMENT TO TOP 5 to prevent rate limits
+                activities_to_enrich = relevant[:5]
+                logger.info(f"Enriching top {len(activities_to_enrich)} activities (capped) with full details...")
                 try:
                     async with httpx.AsyncClient(timeout=30.0) as detail_client:
                         # Fetch details in parallel
                         tasks = [
                             detail_client.get(f"{MCP_SERVER_URL}/activities/{act['id']}", headers=headers)
-                            for act in relevant
+                            for act in activities_to_enrich
                         ]
                         responses = await asyncio.gather(*tasks, return_exceptions=True)
                         
                         # Merge details back
                         for i, res in enumerate(responses):
-                            if isinstance(res, httpx.Response) and res.status_code == 200:
-                                detailed_data = res.json()
-                                # Update the relevant activity with detailed fields
-                                relevant[i]['private_note'] = detailed_data.get('private_note')
-                                relevant[i]['description'] = detailed_data.get('description')
-                                # Also update name/type just in case
-                                relevant[i]['name'] = detailed_data.get('name')
-                                
-                                # Inject top segments for context
-                                segs = detailed_data.get('segment_efforts', [])
-                                relevant[i]['segments'] = [
-                                    {
-                                        'name': s.get('name'), 
-                                        'elapsed_time': s.get('elapsed_time'),
-                                        'id': s.get('segment', {}).get('id')
-                                    } 
-                                    for s in segs[:15]
-                                ]
-                                
-                                # Persist segments found in this detailed activity
-                                try:
-                                    save_segments_from_activity(detailed_data, db)
-                                except Exception as e:
-                                    logger.error(f"Failed to save segments for activity {detailed_data.get('id')}: {e}")
+                            if isinstance(res, httpx.Response):
+                                if res.status_code == 429:
+                                    logger.warning(f"Rate limit hit enriching activity {relevant[i].get('id')}")
+                                elif res.status_code == 200:
+                                    detailed_data = res.json()
+                                    # Update the relevant activity with detailed fields
+                                    relevant[i]['private_note'] = detailed_data.get('private_note')
+                                    relevant[i]['description'] = detailed_data.get('description')
+                                    # Also update name/type just in case
+                                    relevant[i]['name'] = detailed_data.get('name')
+                                    
+                                    # Inject top segments for context
+                                    segs = detailed_data.get('segment_efforts', [])
+                                    relevant[i]['segments'] = [
+                                        {
+                                            'name': s.get('name'), 
+                                            'elapsed_time': f"{int(s.get('elapsed_time', 0)) // 60}:{int(s.get('elapsed_time', 0)) % 60:02d}",
+                                            'id': s.get('segment', {}).get('id')
+                                        } 
+                                        for s in segs[:15]
+                                    ]
+                                    
+                                    # Persist segments found in this detailed activity
+                                    try:
+                                        save_segments_from_activity(detailed_data, db)
+                                    except Exception as e:
+                                        logger.error(f"Failed to save segments for activity {detailed_data.get('id')}: {e}")
                 except Exception as e:
                     logger.error(f"Enrichment failed: {e}")
             
@@ -329,16 +376,20 @@ IMPORTANT INSTRUCTIONS:
 - **DATA FIELDS**: The activity data provided uses specific field names:
   - `distance_miles`: Distance of the activity in miles.
   - `elevation_feet`: Elevation gain in feet.
-  - `moving_time_seconds`: Moving time in seconds (convert to hours/minutes for display).
+  - `moving_time_seconds`: Moving time in seconds (convert to hours/minutes for display, e.g. "4h 30m").
+  - `elapsed_time_str`: Pre-formatted elapsed time string (e.g., "26h 8m"). **ALWAYS USE THIS FIELD** for elapsed time. Do not calculate from seconds.
+  - `elapsed_time_seconds`: Total elapsed time in seconds. Ignored in favor of `elapsed_time_str`.
   - `type`: Activity type (e.g., Run, Ride, TrailRun).
+  - `athlete_count`: Number of athletes in the group. Use `athlete_count > 1` to identify runs with others.
+  - `route_match_count`: Total number of times this specific route has been run. To find "other" runs on this route, subtract 1.
   - `name`: Name of the activity.
   - `date`: Date of the activity (YYYY-MM-DD).
-  - `segments`: List of segments (name, elapsed_time, id) for detailed activities. Format `elapsed_time` (seconds) as minutes:seconds (e.g., "5:30").
+  - `segments`: List of segments. Format times as Minutes:Seconds (e.g., "12:30").
 
 - **LINKING & FORMATTING**:
   - **ACTIVITY STRUCTURE**: 
     1. Start with the Activity Name as a Heading 3 link: `### [Activity Name](https://www.strava.com/activities/{id})`
-    2. Follow with a bulleted list for stats (Distance, Elevation, Moving Time).
+    2. Follow with a bulleted list for stats: Distance, Elevation, Moving Time, and **Elapsed Time** (if significantly different, e.g. for races).
     3. If listing segments, use Heading 4: `#### Top Segments`
     4. List segments as bullet points with links: `- [Segment Name](https://www.strava.com/segments/{id}) - {elapsed_time}`
   - **EXAMPLE**:
@@ -351,6 +402,7 @@ IMPORTANT INSTRUCTIONS:
     - [Sprint Finish](https://www.strava.com/segments/654) - 0:45
 
 - **COMPARISONS**: When comparing years, only compare matching time periods.
+- **SEARCHING**: If the user asks for a specific edition of an event (e.g. "16th running"), **CHECK THE `description` AND `private_note` FIELDS**. The edition number is often mentioned there (e.g. "16th finish", "year 16"). Does not strictly need to match "running".
 - **CALCULATIONS**: You are a data analyst. If the user asks for aggregates (e.g., "weekly mileage") and you have a list of activities, YOU MUST CALCULATE the aggregates yourself by summing the relevant fields (e.g., `distance_miles`) for the requested time periods. Do not say data is missing if you have the list of activities.
 - **SUMMARIES**: Use summary_by_year for aggregate queries when detailed activities aren't provided.
 - **TONE**: Provide concise and encouraging responses."""
@@ -371,6 +423,19 @@ IMPORTANT INSTRUCTIONS:
 Answer the user's question based on this data. If the answer cannot be determined from the data, say so."""
         
         # 4. Generate Answer using LLM provider (OpenRouter, DeepSeek, or Gemini)
+        
+        # Check Cache
+        import hashlib
+
+        from .models import LLMCache
+        
+        prompt_hash = hashlib.sha256(user_prompt.encode()).hexdigest()
+        cached_entry = db.query(LLMCache).filter(LLMCache.prompt_hash == prompt_hash).first()
+        
+        if cached_entry:
+            logger.info("Returning cached LLM response")
+            return QueryResponse(answer=cached_entry.response, data_used=context_data)
+
         try:
             llm = get_llm_provider()
             
@@ -384,6 +449,12 @@ Answer the user's question based on this data. If the answer cannot be determine
                 max_tokens=2000,
                 query_type=query_type  # For smart model selection with OpenRouter
             )
+            
+            # Save to Cache
+            new_cache = LLMCache(prompt_hash=prompt_hash, response=answer_text)
+            db.add(new_cache)
+            db.commit()
+            
         except ValueError as e:
             # Configuration error
             raise HTTPException(
@@ -401,7 +472,7 @@ Answer the user's question based on this data. If the answer cannot be determine
             logger.error(f"LLM generation error: {error_str}")
             
             if "context" in error_msg or "token" in error_msg or "length" in error_msg:
-                answer_text = f"I apologize, but the query requires too much data to process at once. Please try a more specific question or a shorter time range."
+                answer_text = "I apologize, but the query requires too much data to process at once. Please try a more specific question or a shorter time range."
             elif "404" in error_str or "not found" in error_msg:
                 # Check if it's an OpenRouter model availability issue
                 raise HTTPException(

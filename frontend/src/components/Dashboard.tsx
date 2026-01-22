@@ -160,7 +160,20 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                                     <div className="whitespace-pre-wrap">{msg.content}</div>
                                 ) : (
                                     <div className="prose prose-sm max-w-none dark:prose-invert">
-                                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                        <ReactMarkdown
+                                            components={{
+                                                a: ({ node, ...props }) => (
+                                                    <a
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-orange-600 dark:text-orange-400 underline font-semibold hover:text-orange-800 dark:hover:text-orange-300 transition-colors"
+                                                        {...props}
+                                                    />
+                                                )
+                                            }}
+                                        >
+                                            {msg.content}
+                                        </ReactMarkdown>
                                     </div>
                                 )}
                             </div>

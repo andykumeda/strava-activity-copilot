@@ -1,7 +1,7 @@
 
-import dateparser
 import logging
-from datetime import datetime
+
+import dateparser
 
 # Configure logging to stdout
 logging.basicConfig(level=logging.INFO)

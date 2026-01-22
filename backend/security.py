@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta
-from typing import Optional, Any, Union
+from typing import Optional, Union
+
 from jose import jwt
+
 from .config import settings
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """

@@ -14,3 +14,8 @@ dateparser
 polyline
 slowapi
 cryptography
+pytest
+pytest-asyncio
+mypy
+ruff
+
