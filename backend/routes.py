@@ -93,7 +93,34 @@ def determine_query_type(question: str, optimized_context: dict) -> str:
     elif any(word in question_lower for word in ['analyze', 'trend', 'pattern', 'why', 'reason']):
         return "analysis"
     else:
+    else:
         return "general"
+
+@router.get("/status")
+@limiter.limit("20/minute")
+async def get_system_status(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get system status including hydration progress."""
+    try:
+        token = await get_valid_token(user, db)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{MCP_SERVER_URL}/athlete/stats",
+                headers={"X-Strava-Token": token}
+            )
+            if resp.status_code == 200:
+                stats = resp.json()
+                return {
+                    "status": "online",
+                    "sync": stats.get("app_status", {})
+                }
+            return {"status": "error", "message": "Failed to fetch stats from MCP"}
+            
+    except Exception as e:
+        logger.error(f"Status check failed: {e}")
+        return {"status": "error", "message": str(e)}
 
 @router.post("/query", response_model=QueryResponse)
 @limiter.limit("10/minute")
@@ -155,6 +182,35 @@ async def query_strava_data(
                 stats=stats_data
             )
             optimized_context = optimizer.optimize_context()
+            
+            # --- ON-DEMAND HYDRATION TRIGGER ---
+            # If the context optimizer identified specific relevant activities that are missing details,
+            # we trigger an immediate background hydration for them on the MCP server.
+            try:
+                selected_activities = optimized_context.get('activities', [])
+                # Filter for unhydrated items
+                unhydrated_ids = [
+                    a['id'] for a in selected_activities 
+                    if isinstance(a, dict) and not a.get('hydrated') 
+                    # Optional: Add type filter if strictness needed, but trusting Optimizer is better
+                ]
+                
+                if unhydrated_ids:
+                    logger.info(f"Triggering on-demand hydration for {len(unhydrated_ids)} activities.")
+                    # Fire and forget (don't block the user response excessively)
+                    # We cap at 20 to ensure responsiveness and not flood limits
+                    ids_to_hydrate = unhydrated_ids[:20]
+                    
+                    async with httpx.AsyncClient(timeout=2.0) as h_client:
+                        await h_client.post(
+                            f"{MCP_SERVER_URL}/activities/hydrate_ids",
+                            json={"ids": ids_to_hydrate},
+                            headers=headers
+                        )
+            except Exception as e:
+                # Log but do not fail the request
+                logger.error(f"On-demand hydration trigger failed: {e}")
+
             
             # Log the strategy for debugging
             logger = logging.getLogger(__name__)
@@ -358,6 +414,42 @@ async def query_strava_data(
                                         logger.error(f"Failed to save segments for activity {detailed_data.get('id')}: {e}")
                 except Exception as e:
                     logger.error(f"Enrichment failed: {e}")
+
+            # GEAR & ZONES ENRICHMENT
+            # If the user asks about heart rate zones, intensity, or gear (shoes/bikes).
+            try:
+                question_lower = query.question.lower()
+                
+                # ZONES
+                if any(w in question_lower for w in ['zone', 'heart rate', 'power', 'intensity', 'distribution']):
+                    # Fetch zones for the enriched/top activities (cap at 3 to be safe)
+                    acts_to_zone = relevant[:3] if relevant else []
+                    if acts_to_zone:
+                        logger.info(f"Fetching zones for {len(acts_to_zone)} activities...")
+                        async with httpx.AsyncClient(timeout=10.0) as zone_client:
+                            tasks = [
+                                zone_client.get(f"{MCP_SERVER_URL}/activities/{act['id']}/zones", headers=headers)
+                                for act in acts_to_zone
+                            ]
+                            responses = await asyncio.gather(*tasks, return_exceptions=True)
+                            
+                            for i, res in enumerate(responses):
+                                if isinstance(res, httpx.Response) and res.status_code == 200:
+                                    # Inject zones into the activity object
+                                    acts_to_zone[i]['zones'] = res.json()
+                
+                # GEAR
+                if any(w in question_lower for w in ['shoe', 'bike', 'gear', 'equipment', 'mileage']):
+                    # Check if activities have gear_id
+                    # Also consider fetching the full gear list if needed, but usually stats has gear summaries.
+                    # Let's check if we need specific gear details.
+                    pass 
+                    # Note: Athlete Stats (already fetched) contains `shoes` and `bikes` lists with names and total mileage.
+                    # So we might not need to fetch individual gear unless we want specific details not in summary.
+                    # We will ensure 'stats' is passed to context effectively.
+                    
+            except Exception as e:
+                logger.error(f"Gear/Zone enrichment failed: {e}")
             
         except Exception as e:
             # import logging (removed to avoid shadowing)
@@ -390,17 +482,21 @@ IMPORTANT INSTRUCTIONS:
   - **ACTIVITY STRUCTURE**: 
     1. Start with the Activity Name as a Heading 3 link: `### [Activity Name](https://www.strava.com/activities/{id})`
     2. Follow with a bulleted list for stats: Distance, Elevation, Moving Time, and **Elapsed Time** (if significantly different, e.g. for races).
-    3. If listing segments, use Heading 4: `#### Top Segments`
-    4. List segments as bullet points with links: `- [Segment Name](https://www.strava.com/segments/{id}) - {elapsed_time}`
+    3. **MAP LINK**: Always include a map link if the user asks for visualization: `[View Interactive Map](http://localhost:8001/activities/{id}/map)`
+    4. If listing segments, use Heading 4: `#### Top Segments`
+    5. List segments as bullet points with links: `- [Segment Name](https://www.strava.com/segments/{id}) - {elapsed_time}`
   - **EXAMPLE**:
     ### [Morning Run](https://www.strava.com/activities/12345)
     - **Distance**: 5.2 miles
     - **Elevation**: 400 ft
     - **Time**: 45:30
+    - [View Interactive Map](http://localhost:8001/activities/12345/map)
     #### Top Segments
     - [Big Hill](https://www.strava.com/segments/987) - 12:30
     - [Sprint Finish](https://www.strava.com/segments/654) - 0:45
 
+- **GEAR & EQUIPMENT**: If the user asks about shoes or bikes, check the "gear" field in activity details or athlete stats.
+- **ZONES**: If the user asks about intensity, heart rate zones, or "time in zone", use the zones data if available.
 - **COMPARISONS**: When comparing years, only compare matching time periods.
 - **SEARCHING**: If the user asks for a specific edition of an event (e.g. "16th running"), **CHECK THE `description` AND `private_note` FIELDS**. The edition number is often mentioned there (e.g. "16th finish", "year 16"). Does not strictly need to match "running".
 - **CALCULATIONS**: You are a data analyst. If the user asks for aggregates (e.g., "weekly mileage") and you have a list of activities, YOU MUST CALCULATE the aggregates yourself by summing the relevant fields (e.g., `distance_miles`) for the requested time periods. Do not say data is missing if you have the list of activities.

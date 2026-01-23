@@ -241,7 +241,8 @@ class ContextOptimizer:
                 # Apply same filtering logic
                 for match_text, date_obj in found:
                     match_lower = match_text.lower()
-                    if match_lower in ['time', 'date']: continue
+                    if match_lower in ['time', 'date']:
+                        continue
                     if re.match(r'^\d+(st|nd|rd|th)$', match_lower):
                          continue
                     

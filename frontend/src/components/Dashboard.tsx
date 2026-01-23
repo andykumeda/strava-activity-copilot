@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Send, User as UserIcon, Activity } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Send, User as UserIcon, Activity, RefreshCw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { User, Message } from '../types';
 import { API_ENDPOINTS } from '../config';
@@ -15,6 +15,34 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     const [loading, setLoading] = useState(false);
     const [history, setHistory] = useState<string[]>([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
+    const [syncStats, setSyncStats] = useState<{ synced: number, enriched: number, percent: number } | null>(null);
+
+    useEffect(() => {
+        const fetchStatus = async () => {
+            try {
+                const res = await fetch(API_ENDPOINTS.STATUS, { credentials: 'include' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status === 'online' && data.sync) {
+                        setSyncStats({
+                            synced: data.sync.synced_activities,
+                            enriched: data.sync.enriched_activities,
+                            percent: data.sync.percent
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error("Status check failed", e);
+            }
+        };
+
+        // Initial fetch
+        fetchStatus();
+
+        // Poll every 10 seconds to keep updated during hydration
+        const interval = setInterval(fetchStatus, 10000);
+        return () => clearInterval(interval);
+    }, []);
 
     const submitQuestion = async (text: string) => {
         if (!text.trim()) return;
@@ -118,6 +146,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                     <h1 className="text-xl font-bold text-gray-800 dark:text-white">ActivityCopilot</h1>
                 </div>
                 <div className="flex items-center gap-4">
+                    {syncStats && (
+                        <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2.5 py-1.5 rounded-full" title={`${syncStats.enriched} / ${syncStats.synced} activities enriched`}>
+                            <RefreshCw className={`w-3 h-3 ${syncStats.percent < 100 ? 'animate-spin' : ''}`} />
+                            <span className="font-medium">{syncStats.percent}% Synced</span>
+                        </div>
+                    )}
                     <ThemeToggle />
                     <div className="flex items-center gap-2">
                         {user.profile_picture ? (
@@ -166,7 +200,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                                                     <a
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="text-orange-600 dark:text-orange-400 underline font-semibold hover:text-orange-800 dark:hover:text-orange-300 transition-colors"
+                                                        className="inline-flex items-center gap-0.5 text-orange-700 dark:text-orange-400 font-bold hover:text-orange-800 dark:hover:text-orange-300 transition-colors bg-orange-100 dark:bg-orange-900/30 px-1.5 py-0.5 rounded text-xs sm:text-sm no-underline hover:underline"
                                                         {...props}
                                                     />
                                                 )

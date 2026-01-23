@@ -8,13 +8,20 @@ A production-ready web application that lets users log in with Strava and ask na
 - **Natural Language**: Ask questions like "How many miles did I run in 2025 vs 2024?" or "Show me runs where I mentioned 'pain' in the notes."
 - **Smart Context**: Dynamically switches between summary data (for fast aggregates) and detailed activity records (for specific searches) to optimize performance and cost.
 - **Private Notes Search**: Supports searching your activity notes and descriptions for keywords (e.g., "race", "injury", "easy").
-- **Enriched Activity Details**: Automatically pulls top segments and formats them with clickable links, exact times, and structured headers when you ask for details about a specific run.
+- **Enriched Activity Details**: Automatically pulls top segments, parses "similar activities" to find matched routes, and formats everything with clickable links.
+- **Group Run Detection**: Identifies how many athletes you ran with and highlights social activities.
+- **Deep Data Analysis**:
+  - **Zone Analysis**: Power and Heart Rate zone distribution for deeper training insights.
+  - **Gear Tracking**: Tracks mileage on specific shoes or bikes.
+  - **Map Visualization**: Renders interactive maps for activities directly in the chat.
 
 ### ⚡ Performance & Scale
 - **Full History Access**: Fetches and caches your entire Strava activity history (thousands of activities).
 - **Instant Comparisons**: Aggregate queries (e.g., monthly totals) are processed instantly using pre-computed summaries.
 - **Async Architecture**: Fully asynchronous backend prevents blocking during large data syncs.
-- **Robust Rate Handling**: Automatically handles Strava API rate limits (429 errors) with retries and exponential backoff.
+- **Smart Hydration Priority**: Background sync smartly prioritizes high-value activities (Runs, Rides, Swims) and social events (Kudos/Comments), skipping less relevant data to maximize API quota efficiency.
+- **On-Demand Hydration**: Querying specific historical dates automatically triggers an immediate background fetch for those activities if they aren't already hydrated.
+- **Robust Rate Handling**: Custom-built `StravaRateLimiter` enforces strict daily (800) and 15-minute (80) limits with state persistence and automatic safety aborts.
 
 ### 🔒 Enterprise-Grade Security
 - **Data Encryption**: Strava access tokens are encrypted at rest in the database using Fernet (AES).
@@ -31,7 +38,9 @@ A production-ready web application that lets users log in with Strava and ask na
 - **Dark Mode**: Sleek, eye-friendly dark theme that automatically syncs with system preferences or can be toggled manually.
 - **Command History**: Use Up/Down arrows to cycle through previous queries.
 - **Async Input**: Type your next question while the previous one processes.
-- **Rich Formatting**: AI responses formatted with Markdown bullet points and bold text.
+- **Sync Status**: Real-time progress indicator in the header showing total enrichment percentage (e.g., "75% Synced").
+- **High-Visibility Links**: Activity and Segment links are rendered as distinct, clickable pills for better navigation.
+- **Rich Formatting**: AI responses formatted with Markdown, including structured headers and interactive map embeds.
 
 ## Architecture
 

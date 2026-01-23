@@ -6,5 +6,6 @@ export const API_ENDPOINTS = {
     START: `${API_URL}/api/auth/strava/start`,
   },
   QUERY: `${API_URL}/api/query`,
+  STATUS: `${API_URL}/api/status`,
 } as const;
 
