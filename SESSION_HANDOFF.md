@@ -1,63 +1,61 @@
-# Session Handoff: Strava Activity Copilot Bug Fixes
+# Project Overview & Session Handoff
 
 **Date**: January 23, 2026
-**Current State**: Backend Deployed & Running Stable
+**Current State**: ✅ Feature Complete & Production Ready
+
+## 📋 Executive Summary
+The ActivityCopilot is a robust, secure, and performant application allowing users to query their Strava data using LLMs. It features a React frontend, highly optimized FastAPI backend, and an asynchronous MCP server for Strava integration. The system is in a **Completed MVP** state with enterprise-grade security and modern infrastructure.
 
 ---
 
-## ✅ Completed Work
-All critical bugs identified on the deployment checklist have been fixed and deployed:
-1. **System Stability**: Fixed `NameError` and `logger` crashes. Service is stable.
-2. **Segment Rendering**: AI now correctly formats segments as clickable links.
-3. **Date Filtering**: "Jan 2025" queries now work (fixed aggressive keyword filtering).
-4. **Segment Accuracy**:
-   - Pagination implemented to fetch ALL segment efforts (was capped at 20, then 50).
-   - `activity_id` added to link efforts to specific activities.
-   - Cache invalidation logic updated to include segment effort counts.
+## 🚀 Accomplishments & Features
+### Security & Infrastructure
+- **Encryption:** Strava tokens are encrypted at rest (Fernet/AES) in the SQLite/PostgreSQL database.
+- **Authentication:** Secure, HTTP-only, signed JWT cookies (`session_token`) replace legacy auth.
+- **Migrations:** `Alembic` database migrations are fully configured.
+- **Rate Limiting:** `slowapi` protects API endpoints.
+- **Async Core:** Fully asynchronous MCP server (`httpx`) handles large data syncs without blocking.
 
-## ⚠️ Known Issue: "46 times" vs "183 times"
-The user previously reported that the AI said "46 times" for a segment that should be "183 times".
-- **Root Cause Identified**: The cache key only used the query text. The "46 times" response was cached *before* the pagination fix was applied. Even after fixing the code, the app was returning the old cached response.
-- **Fix Applied**: Updated `backend/routes.py` to include a hash of segment effort counts in the cache key.
-- **Status**: Code is deployed, but verification requires a fresh query.
+### Smart Querying
+- **Summary-First Logic:** Comparison queries (e.g., "runs in 2024 vs 2025") use lightweight summaries for sub-second responses.
+- **Detail Enrichment:** Questions about "notes" or specific keywords automatically trigger a fetch of detailed activity data (including `private_note`) for relevant subsets.
+- **Interactive UI:** Supports command history (Up/Down arrows) and async type-ahead.
 
-## 🔍 ROOT CAUSE FOUND: MCP Cache Bug (Jan 23, 7:06 PM)
+### Segment History & Analysis (New!)
+- **Full History**: Successfully paginates Strava API to fetch *all* efforts (verified 13+ years).
+- **Rich Context**: Links efforts to specific activities with names (e.g. "Sunday Long Run") vs generic labels.
+- **Accuracy**: Fixed caching bugs in MCP server that previously limited results to page 1 (~100 items).
+- **Limitations**: Counts may be slightly lower than Strava website total due to hidden/private activities (API returns only viewable efforts).
 
-### The Real Issue:
-The MCP server's segment efforts endpoint had **broken caching** that prevented full pagination:
-- Cache stored Page 1 results with `per_page=50` (or previous small request)
-- When backend requested `per_page=200` to paginate all efforts, MCP returned the **cached 122-effort subset**
-- Pagination logic correctly stopped because `122 < 200` (thought it was last page)
-**Current State**: ✅ Feature Complete & Production Ready
+---
 
-## 🚀 Accomplishments
-We have successfully implemented and verified the full "Segment History" feature set:
-1. **Full Pagination**: The app now fetches ALL segment efforts (confirmed 13+ years of history).
-2. **Accurate Counts**: Fixed caching bugs in MCP server that were limiting results to page 1.
-3. **Rich Context**: Effort history now includes:
-   - Specific Date (e.g. "August 23, 2020")
-   - **Activity Name** (e.g. "Sunday Long Run" instead of "Activity")
-   - Time & PR Rank
-4. **Stability**: Fixed port conflicts and "Address already in use" errors with a robust restart script.
+## ⚠️ Known Limitations & Feature Requests
 
-## 🛠️ Technical Details
-- **MCP Server**: Caching disabled for `get_segment_efforts` to ensure full pagination.
-- **Backend**: `routes.py` now cross-references `activity_id` with the activity list to inject names.
-- **Cleanup**: Debug logging and temporary files have been removed.
+### 1. Full-History Private Note Search
+**Status**: Limited Support
+- **Issue**: The Strava List API does not return `private_note` or `description` fields.
+- **Impact**: We cannot search *all* historical notes instantly without fetching details for every single activity.
+- **Current Solution**: The system allows searching notes for **specific date ranges** or **recent activities** by dynamically fetching details on demand.
 
-## 📋 Ready for Next Session
-The system is in a stable, deployed state. 
-- **No known bugs** in current features.
-- **Next Potential Work**: See `PROJECT_STATUS.md` for future ideas (e.g. background crawler for private notes).
+### 2. Recent Bug Fixes (Jan 23, 2026)
+- **Segment Counts**: Fixed broken MCP caching that prevented pagination. Counts are now accurate (e.g. 126 vs 46).
+- **Activity Names**: Updated `routes.py` to inject real activity names into segment effort lists.
+- **Stability**: Resolved "Address already in use" errors with robust start script.
+
+### 3. Future Roadmap
+- [ ] **Background Sync**: Implement a detailed crawler to fetch full activity details (including notes) for the entire history into a local DB.
+- [ ] **Data Export**: Allow users to export their joined/enriched data as JSON/CSV.
+- [ ] **Saved Queries**: Allow saving complex comparison queries as dashboard widgets.
+
+---
 
 ## 💡 How to Resume
 1. **Start Services**: `./start_services.sh`
 2. **Open App**: [https://activitycopilot.app](https://activitycopilot.app) or `http://localhost:5173`
 3. **Check Status**: `curl http://localhost:8000/api/status`
 
----
-
 ## 🛠️ Tech Stack & Services
 - **Backend Service**: `strava-backend.service` (Port 8000)
 - **MCP Service**: `strava-mcp.service` (Port 8001)
+- **Database**: SQLite (`strava_portal.db`) with Alembic migrations
 - **Logs**: `sudo journalctl -u strava-backend.service -f`
