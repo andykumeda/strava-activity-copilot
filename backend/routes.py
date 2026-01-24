@@ -305,7 +305,7 @@ async def query_strava_data(
                         # Extract activity IDs from effort history and fetch activity summaries
                         # This allows AI to show which activities contain this segment
                         activity_ids = []
-                        for e in effort_history[:20]:  # Limit to 20 most recent
+                        for e in effort_history:  # Show ALL efforts (no limit)
                             act_id = e.get("activity", {}).get("id") if isinstance(e.get("activity"), dict) else e.get("activity")
                             if act_id:
                                 activity_ids.append(act_id)
@@ -341,7 +341,7 @@ async def query_strava_data(
                                     "time_str": format_seconds_to_str(e.get("elapsed_time")),
                                     "elapsed_time": e.get("elapsed_time"),
                                     "pr_rank": e.get("pr_rank")
-                                } for e in effort_history[:20] # Show up to 20 attempts
+                                } for e in effort_history  # Show ALL efforts (no limit)
                             ],
                             "activities_with_segment": segment_activities  # NEW: Full activity details
                         })
