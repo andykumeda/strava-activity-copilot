@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Dict
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm import Session
@@ -599,7 +599,7 @@ IMPORTANT INSTRUCTIONS:
 2. **ACTIVITY TITLES**: Always link activity names as Heading 3: `### [Activity Name](https://www.strava.com/activities/{id})`
 3. **SEGMENTS**: List segments under `#### Top Segments`. If no segments are in the data, state "No segments found".
 4. **DISTANCE DISPLAY**: For "exactly" queries, round to 1 decimal place (e.g. "5.0 miles") if the data is within 0.05 miles of the target.
-5. **GPX DOWNLOAD**: If the user asks to export/download a route as GPX, provide a download link: `[Download GPX File](/api/routes/{route_id}/gpx)`
+5. **GPX DOWNLOAD**: If the user asks to export/download a route as GPX, provide a download link: `[Download GPX File](/api/routes/{{route_id}}/gpx)`
 
 
 === USER QUESTION ===

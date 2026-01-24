@@ -13,7 +13,7 @@ nohup $VENV_PYTHON "$PROJECT_DIR/mcp-server/src/strava_http_server.py" > "$PROJE
 
 echo "Starting Backend Server on port 8000..."
 cd "$PROJECT_DIR"
-nohup $VENV_UVICORN backend.main:app --host 127.0.0.1 --port 8000 --reload > "$PROJECT_DIR/backend_new.log" 2>&1 &
+nohup $VENV_UVICORN backend.main:app --host 127.0.0.1 --port 8000 > "$PROJECT_DIR/backend_new.log" 2>&1 &
 
 echo "Starting Frontend Dev Server on port 5173..."
 fuser -k 5173/tcp 2>/dev/null
