@@ -493,7 +493,9 @@ IMPORTANT INSTRUCTIONS:
     2. Follow with the Date: `**Date**: {date}` (MANDATORY)
     3. Follow with stats: `- **Distance**: 5.2 miles`, etc.
     4. **MAP LINK**: DO NOT INCLUDE ANY MAP LINKS.
-    5. **SEGMENTS**: If segments are in the data, list them under `#### Top Segments`.
+    5. **SEGMENTS**: If segments are in the data, list them under `#### Top Segments` as bullet points with links:
+       - Format: `- [Segment Name](https://www.strava.com/segments/{segment_id}) - {time}`
+       - Example: `- [Big Hill Climb](https://www.strava.com/segments/12345) - 12:30`
 - **DATA ANALYSIS**: 
   - **DISTANCES**: If you are searching for an "exactly X miles" run, and the data shows X.008 or X.992, you MUST report it as exactly "X.0 miles". Strava UI rounds to 1 decimal place, so match that look.
   - **DATES**: Every activity summary MUST start with the full date (e.g. August 2, 2025).
