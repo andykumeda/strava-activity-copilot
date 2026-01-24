@@ -23,8 +23,8 @@ class StravaRateLimiter:
     STATE_FILE = "rate_limit_state.json"
     
     # Safety Limits
-    LIMIT_15_MIN = 80
-    LIMIT_DAILY = 950
+    LIMIT_15_MIN = 90
+    LIMIT_DAILY = 980
     
     def __init__(self):
         self.requests_15m: List[float] = []

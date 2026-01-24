@@ -455,23 +455,23 @@ async def hydrate_activities_background(token: str):
         
         # Priority check: If we are nearing the global or daily limit, slow down or stop
         # background hydration to leave room for live user queries.
-        sleep_time = 5 
+        sleep_time = 2 
         
         # DAILY LIMIT PROTECTION
-        if used_daily > (limit_daily * 0.9): # > 720 calls
+        if used_daily > (limit_daily * 0.95): # > 900 calls (was 720)
             logger.warning("Daily rate limit nearly reached. Stopping background hydration for the day.")
             break
             
         # 15-MINUTE THROTTLING
-        if used_15m > (limit_15m * 0.8): # > 64 calls / 15m 
+        if used_15m > (limit_15m * 0.9): # > 72 calls 
             logger.warning("Critical 15m rate limit usage. Pausing background hydration.")
             break
-        elif used_15m > (limit_15m * 0.6): # > 48 calls / 15m 
-            logger.info("High 15m rate limit usage. Throttling background hydration (20s sleep).")
-            sleep_time = 20 
-        elif used_15m > (limit_15m * 0.4): # > 32 calls / 15m 
-            logger.info("Moderate 15m rate limit usage. Throttling background hydration (10s sleep).")
-            sleep_time = 10 
+        elif used_15m > (limit_15m * 0.75): # > 60 calls
+            logger.info("High 15m rate limit usage. Throttling background hydration (10s sleep).")
+            sleep_time = 10
+        elif used_15m > (limit_15m * 0.5): # > 40 calls
+            logger.info("Moderate 15m rate limit usage. Throttling background hydration (5s sleep).")
+            sleep_time = 5 
 
 
         # Check if already hydrated (by another process)
