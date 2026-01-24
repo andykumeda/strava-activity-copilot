@@ -302,6 +302,26 @@ async def query_strava_data(
                         leaderboard_data = resps[1].json() if isinstance(resps[1], httpx.Response) and resps[1].status_code == 200 else {}
                         effort_history = resps[2].json() if isinstance(resps[2], httpx.Response) and resps[2].status_code == 200 else []
 
+                        # Extract activity IDs from effort history and fetch activity summaries
+                        # This allows AI to show which activities contain this segment
+                        activity_ids = []
+                        for e in effort_history[:20]:  # Limit to 20 most recent
+                            act_id = e.get("activity", {}).get("id") if isinstance(e.get("activity"), dict) else e.get("activity")
+                            if act_id:
+                                activity_ids.append(act_id)
+                        
+                        # Fetch activity summaries for these IDs from the activity summary data
+                        segment_activities = []
+                        if activity_ids:
+                            # Look up activities from the already-fetched activity_summary data
+                            for date_str, activities in activity_summary_data.get("activities_by_date", {}).items():
+                                for act in activities:
+                                    if act.get("id") in activity_ids:
+                                        segment_activities.append({
+                                            **act,
+                                            "date": date_str
+                                        })
+
                         found_segments_data.append({
                             "id": seg_id,
                             "name": segment_details.get("name", seg_name),
@@ -322,7 +342,8 @@ async def query_strava_data(
                                     "elapsed_time": e.get("elapsed_time"),
                                     "pr_rank": e.get("pr_rank")
                                 } for e in effort_history[:20] # Show up to 20 attempts
-                            ]
+                            ],
+                            "activities_with_segment": segment_activities  # NEW: Full activity details
                         })
                 if found_segments_data:
                     optimized_context["mentioned_segments"] = found_segments_data
