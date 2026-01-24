@@ -32,6 +32,7 @@ The ActivityCopilot is a robust, secure, and performant application allowing use
 - **Current Solution**: The system allows searching notes for **specific date ranges** or **recent activities** by dynamically fetching details on demand.
 
 ### 2. Recent Bug Fixes (Jan 23, 2026)
+- **Rate Limiter Fortification**: Fixed "leaky" limiter that only counted successes. Now tracks every *attempt* pre-request and implements a **global lockout** if a 429 is received. Reduced safety mirrors to 80/15m and 800/d.
 - **GPX Export Repair**: Fixed a series of backend proxy issues (`NameError`, `AsyncIteratorError`, `NoneType` headers) to ensure robust file serving.
 - **Segment History Pagination**: Fixed broken MCP caching that previously limited results to page 1.
 - **Sync Status**: Optimized speed (2s base sleep, bumped capacity). Progress is auto-saved to disk.

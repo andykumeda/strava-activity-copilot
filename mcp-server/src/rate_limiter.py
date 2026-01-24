@@ -22,9 +22,9 @@ class StravaRateLimiter:
     
     STATE_FILE = "rate_limit_state.json"
     
-    # Safety Limits
-    LIMIT_15_MIN = 90
-    LIMIT_DAILY = 980
+    # Safety Limits (Stricter: 80% of 100/15m and 80% of 1000/day)
+    LIMIT_15_MIN = 80
+    LIMIT_DAILY = 800
     
     def __init__(self):
         self.requests_15m: List[float] = []
@@ -35,12 +35,12 @@ class StravaRateLimiter:
         """Load request timestamps from disk."""
         if os.path.exists(self.STATE_FILE):
             try:
+                # Use simple file reading for speed; assuming single instance or sporadic access
                 with open(self.STATE_FILE, 'r') as f:
                     data = json.load(f)
                     self.requests_15m = data.get('15m', [])
                     self.requests_daily = data.get('daily', [])
                 self._cleanup()
-                logger.info(f"Rate Limiter loaded. Used: {len(self.requests_15m)}/15m, {len(self.requests_daily)}/day")
             except Exception as e:
                 logger.error(f"Failed to load rate limit state: {e}")
                 
@@ -64,8 +64,8 @@ class StravaRateLimiter:
         self.requests_daily = [t for t in self.requests_daily if now - t < 86400]
 
     def can_request(self) -> bool:
-        """Check if a request is allowed. Does NOT record the request."""
-        self._cleanup()
+        """Check if a request is allowed. Reloads state from disk first."""
+        self._load_state() 
         if len(self.requests_15m) >= self.LIMIT_15_MIN:
             logger.warning(f"Rate Limit Hit (15m): {len(self.requests_15m)}/{self.LIMIT_15_MIN}")
             return False
@@ -74,8 +74,9 @@ class StravaRateLimiter:
             return False
         return True
 
-    def record_request(self):
-        """Record a successful request."""
+    def record_attempt(self):
+        """Record a request ATTEMPT (call this BEFORE the HTTP request)."""
+        self._load_state()
         now = time.time()
         self.requests_15m.append(now)
         self.requests_daily.append(now)

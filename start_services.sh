@@ -15,14 +15,11 @@ echo "Starting Backend Server on port 8000..."
 cd "$PROJECT_DIR"
 nohup $VENV_UVICORN backend.main:app --host 127.0.0.1 --port 8000 > "$PROJECT_DIR/backend_new.log" 2>&1 &
 
-echo "Starting Frontend Dev Server on port 5173..."
-fuser -k 5173/tcp 2>/dev/null
-nohup npm --prefix "$PROJECT_DIR/frontend" run dev -- --host > "$PROJECT_DIR/frontend_new.log" 2>&1 &
-
 sleep 5
 echo "--- STATUS CHECK ---"
-ps aux | grep -E "uvicorn|strava_http_server.py|vite" | grep "$PROJECT_DIR"
-ss -tulpn | grep -E ":8000|:8001|:5173"
+ps aux | grep -E "uvicorn|strava_http_server.py" | grep "$PROJECT_DIR"
+ss -tulpn | grep -E ":8000|:8001"
+
 echo "--- LOGS ---"
 tail -n 5 "$PROJECT_DIR/backend_new.log"
 tail -n 5 "$PROJECT_DIR/mcp_new.log"

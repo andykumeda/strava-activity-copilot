@@ -103,21 +103,24 @@ async def make_strava_request(url: str, method: str = "GET", params: Dict[str, A
     if not access_token:
         raise HTTPException(status_code=401, detail="Missing X-Strava-Token header")
     
-    # 1. CHECK RATE LIMITS BEFORE REQUEST
-    if not rate_limiter.can_request():
-        stats = rate_limiter.get_stats()
-        msg = f"Rate Limit Reached (Internal Safety). Used: 15m={stats['15m_used']}, Daily={stats['daily_used']}"
-        logger.error(msg)
-        raise HTTPException(status_code=429, detail=msg)
-
-    headers = {"Authorization": f"Bearer {access_token}"}
-    
     # Retry logic for 429s (Rate Limit Exceeded)
     max_retries = 3
     retry_count = 0
     
+    headers = {"Authorization": f"Bearer {access_token}"}
+    
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
+            # 1. CHECK RATE LIMITS BEFORE EVERY ATTEMPT
+            if not rate_limiter.can_request():
+                stats = rate_limiter.get_stats()
+                msg = f"Rate Limit Reached (Internal Safety). Used: 15m={stats['15m_used']}, Daily={stats['daily_used']}"
+                logger.error(msg)
+                raise HTTPException(status_code=429, detail=msg)
+
+            # 2. RECORD THE ATTEMPT IMMEDIATELY
+            rate_limiter.record_attempt()
+
             try:
                 response = await client.request(
                     method=method,
@@ -126,29 +129,22 @@ async def make_strava_request(url: str, method: str = "GET", params: Dict[str, A
                     params=params
                 )
                 
-                # Check for 429 Rate Limit
+                # Check for 429 Rate Limit from Strava
                 if response.status_code == 429:
-                    if retry_count < max_retries:
-                        retry_count += 1
-                        # Get wait time from header or default to exponential backoff
-                        retry_after = int(response.headers.get("Retry-After", 15))
-                        # Cap potential wait time (don't wait too long)
-                        wait_time = min(retry_after, 60)
-                        
-                        logger.warning(f"Rate limited (429). Waiting {wait_time}s then retrying ({retry_count}/{max_retries})...")
-                        await asyncio.sleep(wait_time)
-                        continue
-                    else:
-                        logger.error("Rate limit retry count exceeded.")
-                        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+                    # Strava is telling us we overshot. 
+                    # We need to aggressively stop everything.
+                    logger.error("!!! STRAVA 429 RECEIVED. Aggressively halting all further requests. !!!")
+                    
+                    # Force the rate limiter to reflect the overload so can_request() fails for everyone
+                    for _ in range(rate_limiter.LIMIT_15_MIN):
+                        rate_limiter.record_attempt()
+
+                    raise HTTPException(status_code=429, detail="Strava API Rate Limit Exceeded (Global Lockout)")
 
                 if response.status_code == 401:
                      raise HTTPException(status_code=401, detail="Invalid or expired Strava token")
                 
                 response.raise_for_status()
-                
-                # 2. RECORD SUCCESSFUL REQUEST
-                rate_limiter.record_request()
                 
                 if response_type == "text":
                     return response.text
