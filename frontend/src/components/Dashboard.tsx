@@ -162,34 +162,38 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     return (
         <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
             {/* Header */}
-            <header className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-6 py-4 flex items-center justify-between shadow-sm transition-colors duration-200">
+            <header className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between shadow-sm transition-colors duration-200">
                 <div className="flex items-center gap-2">
-                    <Activity className="w-6 h-6 text-orange-600" />
-                    <h1 className="text-xl font-bold text-gray-800 dark:text-white">ActivityCopilot</h1>
+                    <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 flex-shrink-0" />
+                    <h1 className="text-base sm:text-xl font-bold text-gray-800 dark:text-white leading-tight">
+                        <span className="sm:hidden">Activity<br />Copilot</span>
+                        <span className="hidden sm:inline">ActivityCopilot</span>
+                    </h1>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 sm:gap-4">
                     {/* Help Button */}
                     <button
                         onClick={() => setShowHelp(true)}
-                        className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2.5 py-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                        className="flex items-center gap-1 sm:gap-1.5 text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 sm:px-2.5 py-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                         title="View example queries"
                     >
                         <HelpCircle className="w-3.5 h-3.5" />
-                        <span className="font-medium">Help</span>
+                        <span className="font-medium hidden sm:inline">Help</span>
                     </button>
                     <ThemeToggle />
                     <div className="flex items-center gap-2">
                         {user.profile_picture ? (
-                            <img src={user.profile_picture} alt={user.name} className="w-8 h-8 rounded-full" />
+                            <img src={user.profile_picture} alt={user.name} className="w-7 h-7 sm:w-8 sm:h-8 rounded-full" />
                         ) : (
-                            <div className="w-8 h-8 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center">
-                                <UserIcon className="w-5 h-5 text-gray-500 dark:text-gray-300" />
+                            <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center">
+                                <UserIcon className="w-4 h-4 sm:w-5 sm:h-5 text-gray-500 dark:text-gray-300" />
                             </div>
                         )}
-                        <span className="font-medium text-gray-700 dark:text-gray-200">{user.name}</span>
+                        <span className="font-medium text-gray-700 dark:text-gray-200 hidden sm:inline text-sm">{user.name}</span>
                     </div>
                 </div>
             </header>
+
 
             {/* Help Modal */}
             {showHelp && (
