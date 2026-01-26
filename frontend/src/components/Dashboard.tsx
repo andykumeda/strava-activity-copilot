@@ -171,7 +171,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     return (
         <div className="flex flex-col h-[100dvh] bg-gray-50 dark:bg-gray-900 transition-colors duration-200" style={{ minHeight: '-webkit-fill-available' }}>
             {/* Header */}
-            <header className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between shadow-sm transition-colors duration-200">
+            <header className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between shadow-sm transition-colors duration-200">
                 <div className="flex items-center gap-2">
                     <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 flex-shrink-0" />
                     <h1 className="text-base sm:text-xl font-bold text-gray-800 dark:text-white leading-tight">
@@ -180,15 +180,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                     </h1>
                 </div>
                 <div className="flex items-center gap-2 sm:gap-4">
-                    {/* Help Button */}
-                    <button
-                        onClick={() => setShowHelp(true)}
-                        className="flex items-center gap-1 sm:gap-1.5 text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 sm:px-2.5 py-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                        title="View example queries"
-                    >
-                        <HelpCircle className="w-3.5 h-3.5" />
-                        <span className="font-medium hidden sm:inline">Help</span>
-                    </button>
+                    {/* Help Button moved to input */}
                     <ThemeToggle />
                     <div className="flex items-center gap-2">
                         {user.profile_picture ? (
@@ -250,10 +242,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
             )}
 
             {/* Chat Area */}
-            <div className={`overflow-y-auto p-2 sm:p-4 md:p-8 min-h-0 ${messages.length > 0 ? 'flex-1' : 'sm:flex-1'}`}>
+            <div className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-8 min-h-0 scroll-pt-20">
                 <div className="max-w-3xl mx-auto space-y-1 sm:space-y-6">
                     {messages.length === 0 && (
-                        <div className="text-center pt-2 pb-[45vh] sm:py-8">
+                        <div className="text-center pt-10 pb-20 sm:py-8">
                             <h2 className="text-base sm:text-2xl font-bold text-gray-800 dark:text-white">Welcome!</h2>
                             <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400 mb-2 sm:mb-6">Ask about your Strava activities.</p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-1 sm:gap-4 text-left">
@@ -323,19 +315,28 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
             {/* Input Area */}
             <div className="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700 transition-colors duration-200 sticky bottom-0 z-10 safe-area-bottom">
-                <div className="max-w-3xl mx-auto flex gap-2">
-                    <input
-                        type="text"
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder="Ask about your activities..."
-                        className="flex-1 p-3 border dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-colors duration-200"
-                    />
+                <div className="max-w-3xl mx-auto flex gap-2 items-center">
+                    <div className="relative flex-1">
+                        <input
+                            type="text"
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder="Ask about your activities..."
+                            className="w-full p-3 pr-10 border dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-colors duration-200"
+                        />
+                        <button
+                            onClick={() => setShowHelp(true)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-orange-500 transition-colors p-1"
+                            title="View example queries"
+                        >
+                            <HelpCircle className="w-5 h-5" />
+                        </button>
+                    </div>
                     <button
                         onClick={handleSend}
                         disabled={loading || !input.trim()}
-                        className="bg-orange-600 text-white p-3 rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="bg-orange-600 text-white p-3 rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                     >
                         <Send className="w-5 h-5" />
                     </button>
