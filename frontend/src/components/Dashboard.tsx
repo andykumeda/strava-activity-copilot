@@ -58,12 +58,21 @@ const EXAMPLE_QUERIES = [
 ];
 
 const Dashboard: React.FC<DashboardProps> = ({ user }) => {
+    const messagesEndRef = React.useRef<HTMLDivElement>(null);
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(false);
     const [history, setHistory] = useState<string[]>([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [showHelp, setShowHelp] = useState(false);
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    React.useEffect(() => {
+        scrollToBottom();
+    }, [messages, loading]);
 
     const submitQuestion = async (text: string) => {
         if (!text.trim()) return;
@@ -241,10 +250,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
             )}
 
             {/* Chat Area */}
-            <div className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-8 min-h-0">
+            <div className={`overflow-y-auto p-2 sm:p-4 md:p-8 min-h-0 ${messages.length > 0 ? 'flex-1' : 'sm:flex-1'}`}>
                 <div className="max-w-3xl mx-auto space-y-1 sm:space-y-6">
                     {messages.length === 0 && (
-                        <div className="text-center py-2 sm:py-8">
+                        <div className="text-center pt-2 pb-[45vh] sm:py-8">
                             <h2 className="text-base sm:text-2xl font-bold text-gray-800 dark:text-white">Welcome!</h2>
                             <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400 mb-2 sm:mb-6">Ask about your Strava activities.</p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-1 sm:gap-4 text-left">
@@ -308,11 +317,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                             </div>
                         </div>
                     )}
+                    <div ref={messagesEndRef} />
                 </div>
             </div>
 
             {/* Input Area */}
-            <div className="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700 transition-colors duration-200">
+            <div className="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700 transition-colors duration-200 sticky bottom-0 z-10 safe-area-bottom">
                 <div className="max-w-3xl mx-auto flex gap-2">
                     <input
                         type="text"
