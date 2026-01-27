@@ -25,7 +25,9 @@ from .services.segment_service import get_best_efforts_for_segment, save_segment
 from .tools import get_tool_definitions
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("strava_copilot")
+logger.setLevel(logging.INFO)
 
 def format_seconds_to_str(seconds: int) -> str:
     """Format seconds into Mm Ss string."""
@@ -565,8 +567,12 @@ async def query_strava_data(
         system_instruction = f"""You are Antigravity, an elite Strava Activity Copilot.
 Today's Date: {current_date_str}.
 
-- **TEMPORAL AWARENESS (CRITICAL)**:
+  - **TEMPORAL AWARENESS (CRITICAL)**:
   - You are currently in {datetime.now().year}. Today is {current_date_str}.
+  - **DATE CALCULATIONS**:
+    - If the user asks for "last 3 Thursdays" or "activities every Monday", YOU MUST CALCULATE THE SPECIFIC DATES based on Today.
+    - Example: If today is Jan 26 (Monday), "last Thursday" is Jan 22.
+    - Use `search_activities` to find runs on these specific dates (e.g. `after="2026-01-22" before="2026-01-23"`).
   - When the user asks for a summary of a past year (e.g., "summary for 2025"), you are reviewing **HISTORICAL DATA** from that year.
   - **DO NOT** shift your "current" perspective to the requested year.
   - **NEVER** refer to a date in the past (like Jan 27, 2025) as "tomorrow", "next week", "upcoming", or "scheduled".

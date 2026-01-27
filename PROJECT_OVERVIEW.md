@@ -42,6 +42,9 @@ The MCP server provides comprehensive Strava API coverage:
 - **Agent Loop Architecture**: Transitioned backend to a true "Agentic" loop where the LLM can call tools iteratively to solve complex queries.
 - **Sync & Comparison Tools**: Added `sync_activities` capability for on-demand data refresh and logic for multi-year comparisons.
 - **Improved Prompt Engineering**: Taught the agent to use specific tools for "This month vs Last month" queries, matching the capability of code-execution agents.
+- **API Quota Protection (CRITICAL)**:
+   - **Incremental Sync**: Rewrote `sync_activities` to allow "Smart Sync". It now stops fetching pages as soon as it finds known activities, reducing a typical sync from 70+ calls (full history) to just 1 call (latest page).
+   - **Extended Cache**: Increased Cache TTL from 1 hour to 24 hours to further minimize redundant fetching.
 - **Superlative Query Fixes**: (Prior items...)
 - **Superlative Query Fix**: Fixed deterministic handling of "longest", "fastest", "most recent" queries.
   - Implemented logic to prioritize 'distance' over 'moving_time' for 'longest' queries strings.
