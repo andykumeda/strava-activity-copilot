@@ -1,6 +1,6 @@
 # Project Overview & Status
 
-**Last Updated**: January 25, 2026
+**Last Updated**: January 26, 2026
 **Current State**: ✅ Feature Complete & Production Ready
 
 ## 📋 Executive Summary
@@ -36,37 +36,29 @@ The MCP server provides comprehensive Strava API coverage:
 
 ---
 
-## 🚀 Recent Changes (Jan 25, 2026)
+## 🚀 Recent Changes
 
-### API Quota Optimization
-- **Disabled Background Hydration**: Removed all 4 automatic hydration triggers that were consuming 25+ API calls on startup
-- **Rate Limit Updated**: Changed from 80/15m safety limit to official 100/15m
-- **On-Demand Enrichment**: Activity details now fetched only when explicitly queried
-- **Loading Message**: Frontend shows "Fetching activity details... this may take a moment" during queries
+### Jan 26, 2026 (Refactor Complete)
+- **Agent Loop Architecture**: Transitioned backend to a true "Agentic" loop where the LLM can call tools iteratively to solve complex queries.
+- **Sync & Comparison Tools**: Added `sync_activities` capability for on-demand data refresh and logic for multi-year comparisons.
+- **Improved Prompt Engineering**: Taught the agent to use specific tools for "This month vs Last month" queries, matching the capability of code-execution agents.
+- **API Quota Protection (CRITICAL)**:
+   - **Incremental Sync**: Rewrote `sync_activities` to allow "Smart Sync". It now stops fetching pages as soon as it finds known activities, reducing a typical sync from 70+ calls (full history) to just 1 call (latest page).
+   - **Extended Cache**: Increased Cache TTL from 1 hour to 24 hours to further minimize redundant fetching.
+- **Superlative Query Fixes**: (Prior items...)
+- **Superlative Query Fix**: Fixed deterministic handling of "longest", "fastest", "most recent" queries.
+  - Implemented logic to prioritize 'distance' over 'moving_time' for 'longest' queries strings.
+  - Ensures a single, top-ranked activity is returned for superlative queries.
+- **Segment Display Refinement**:
+  - improved markdown formatting for segment lists.
+  - ensured segment links are only displayed when valid data exists.
+  - Removed map visualizations from AI responses to prevent localhost/broken link issues.
 
-### Oldest-First Optimization
-New `/activities/search` endpoint with intelligent fetching:
-```
-GET /activities/search?oldest_first=true&search_name=marathon&activity_type=Run
-```
-- Uses `after` parameter to fetch chronologically (oldest first)
-- Enables early stopping for "first occurrence" queries
-- Reduces API calls from 25 to 1-3 for historical searches
-
-### Feature Parity
-Added 18 new endpoints for full Strava API coverage:
-- Activity streams, laps, comments, kudos
-- Athlete zones
-- Club details, activities, members, admins
-- Route details, streams, TCX export
-- Segment streams, effort streams
-- Star/unstar segments
-- Create/update activities
-- Update athlete
-
-### Bug Fixes
-- Fixed `NameError` crashes from unescaped f-string curly braces in LLM prompts
-- Fixed frontend loading indicator styling
+### Jan 25, 2026
+- **API Quota Optimization**: Disabled background hydration triggers; switched to on-demand enrichment.
+- **Oldest-First Optimization**: Added intelligent chronological fetching for "first time" queries.
+- **Feature Parity**: Added comprehensive endpoint coverage (Streams, Laps, Routes, etc.).
+- **Bug Fixes**: Resolved `NameError` in f-strings and frontend loading UI.
 
 ---
 
